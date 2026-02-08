@@ -1,31 +1,31 @@
 # TOEFL Essay Data
 
-Bu klasör deneylerde kullanılacak TOEFL essay'larını ve insan puanlarını tutar.
+This folder holds TOEFL essays and human scores used in experiments.
 
-## Dosya formatı
+## File format
 
-- **essays_template.csv** — Şablon (1 örnek satır). Kendi veriniz için bu dosyayı `essays.csv` olarak kopyalayıp doldurun:  
+- **essays_template.csv** — Template (1 sample row). Copy it to `essays.csv` and fill with your data:  
   `cp data/essays_template.csv data/essays.csv`
-- **essays.csv** — Kendi essay veriniz (30 essay hedefi). Bu dosya `.gitignore`'da olduğu için repo'ya yüklenmez.
+- **essays.csv** — Your essay data (target: 30 essays). This file is in `.gitignore`, so it is not pushed to the repo.
 
-## Sütunlar
+## Columns
 
-| Sütun         | Açıklama                                      | Örnek |
-|---------------|-----------------------------------------------|-------|
-| essay_id      | Benzersiz essay numarası (1, 2, 3, ...)       | 1     |
-| prompt_text   | Essay sorusu / konu metni                     | Do you agree or disagree... |
-| essay_text    | Öğrencinin yazdığı essay metni                | I strongly agree that... |
-| human_score   | İnsan değerlendiricinin verdiği puan (0–5)    | 4     |
+| Column       | Description                                    | Example |
+|--------------|------------------------------------------------|---------|
+| essay_id     | Unique essay number (1, 2, 3, ...)            | 1       |
+| prompt_text  | Essay question / topic text                    | Do you agree or disagree... |
+| essay_text   | Student's essay text                           | I strongly agree that... |
+| human_score  | Human rater score (0–5)                        | 4       |
 
-## Nasıl doldurulur?
+## How to fill
 
-1. Şablonu kopyalayın: `cp data/essays_template.csv data/essays.csv`
-2. `data/essays.csv` dosyasını açın (Excel, Google Sheets veya metin editörü).
-3. Her satıra bir essay ekleyin: `essay_id`, `prompt_text`, `essay_text`, `human_score`.
-4. `human_score` TOEFL Independent Writing rubric'ine göre 0–5 arası tam sayı olmalı.
-5. Toplamda 30 essay hedefleniyor (deney planına göre).
+1. Copy the template: `cp data/essays_template.csv data/essays.csv`
+2. Open `data/essays.csv` (Excel, Google Sheets, or a text editor).
+3. Add one essay per row: `essay_id`, `prompt_text`, `essay_text`, `human_score`.
+4. `human_score` must be an integer 0–5 according to the TOEFL Independent Writing rubric.
+5. Target total: 30 essays (per experiment plan).
 
-## Notlar
+## Notes
 
-- CSV içinde çok satırlı metinler tırnak (`"`) içinde yazılır; satır sonları metin içinde kalabilir.
-- `data/*.csv` ve `data/*.xlsx` `.gitignore`'da olduğu için, gerçek essay verinizi repo'ya yüklemeden yerel tutabilirsiniz. Sadece şablon/örnek commit edilir.
+- In CSV, multi-line text goes in quotes (`"`); line breaks may appear inside the field.
+- `data/*.csv` and `data/*.xlsx` are in `.gitignore`, so your real essay data stays local; only the template/sample is committed.

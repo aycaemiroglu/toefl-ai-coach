@@ -4,7 +4,7 @@ venv/
 env/
 ENV/
 
-# API Keys (GİZLİ TUTUN!)
+# API Keys (keep secret!)
 .env
 
 # Python
@@ -23,7 +23,7 @@ __pycache__/
 .LSOverride
 ._*
 
-# Data files (şablon commit edilir)
+# Data files (template is committed)
 data/*.json
 data/*.csv
 data/*.xlsx
