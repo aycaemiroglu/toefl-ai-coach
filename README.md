@@ -9,7 +9,7 @@ This research project compares different prompting strategies for automated TOEF
 ## 🔬 Methodology
 
 - **Dataset:** 30 TOEFL essays with human ratings
-- **Models:** Llama 3.1 70B (via Groq API - free)
+- **Models:** Llama 3.3 70B (via Groq API - free)
 - **Strategies Tested:**
   1. Baseline (simple prompt)
   2. Rubric-based (detailed scoring criteria)

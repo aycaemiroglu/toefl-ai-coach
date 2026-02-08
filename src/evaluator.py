@@ -18,7 +18,7 @@ load_dotenv()
 
 class TOEFLEssayScorer:
     """
-    TOEFL essay scorer using Groq's Llama 3.1 70B model.
+    TOEFL essay scorer using Groq's Llama 3.3 70B model.
 
     Supports four prompting strategies:
     - baseline: Simple scoring instruction
@@ -74,7 +74,7 @@ class TOEFLEssayScorer:
         # Call Groq API
         try:
             response = self.client.chat.completions.create(
-                model="llama-3.1-70b-versatile",
+                model="llama-3.3-70b-versatile",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {
@@ -92,7 +92,7 @@ class TOEFLEssayScorer:
             return {
                 "strategy": strategy,
                 "response": result_text,
-                "model": "llama-3.1-70b-versatile",
+                "model": "llama-3.3-70b-versatile",
                 "prompt_tokens": response.usage.prompt_tokens,
                 "completion_tokens": response.usage.completion_tokens
             }
