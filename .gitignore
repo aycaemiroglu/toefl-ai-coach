@@ -23,10 +23,12 @@ __pycache__/
 .LSOverride
 ._*
 
-# Data files 
+# Data files (şablon commit edilir)
 data/*.json
 data/*.csv
 data/*.xlsx
+!data/essays_template.csv
+data/essays/
 results/*.png
 results/*.json
 
