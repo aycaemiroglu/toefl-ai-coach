@@ -13,6 +13,7 @@ import argparse
 import json
 import os
 import random
+import re
 import sys
 import time
 from datetime import datetime
@@ -82,6 +83,16 @@ STANCE_OPTIONS = ["agree", "disagree", "balanced"]
 EXAMPLE_COUNTS = {"B1": [1, 2], "B2": [2, 3], "C1": [2, 3, 4]}
 RHETORICAL_STYLES = ["direct", "analytical", "persuasive", "narrative"]
 
+# Patterns to detect meta-text (non-essay content)
+META_TEXT_PATTERNS = [
+    r"^(Title|Essay|Response|Answer):\s*",
+    r"^Here (is|are) (my|the) (essay|response|answer)",
+    r"^The following (is|contains) (my|the) (essay|response)",
+    r"^\d+\.\s+",  # Numbered lists
+    r"^[-•*]\s+",  # Bullet points
+    r"^#+\s+",  # Markdown headers
+]
+
 
 def count_words(text: str) -> int:
     """Count words in text (simple whitespace-based)."""
@@ -113,7 +124,27 @@ def get_style_constraints(level: str, seed: Optional[int] = None) -> Dict[str, s
     }
 
 
-def build_system_prompt(level: str, style_constraints: Dict[str, str]) -> str:
+def has_meta_text(text: str) -> bool:
+    """
+    Detect if text contains meta-commentary or non-essay content.
+    
+    Returns True if meta-text patterns are found.
+    """
+    lines = text.strip().split("\n")
+    # Check first few lines for meta-text
+    for line in lines[:3]:
+        line_stripped = line.strip()
+        if not line_stripped:
+            continue
+        for pattern in META_TEXT_PATTERNS:
+            if re.match(pattern, line_stripped, re.IGNORECASE):
+                return True
+    return False
+
+
+def build_system_prompt(
+    level: str, style_constraints: Dict[str, str], enforce_word_range: bool = False
+) -> str:
     """Build system prompt for essay generation."""
     spec = LEVEL_SPECS[level]
     min_words, max_words = spec["word_range"]
@@ -133,10 +164,17 @@ def build_system_prompt(level: str, style_constraints: Dict[str, str]) -> str:
         "narrative": "Write in a narrative style, using personal anecdotes or stories where appropriate.",
     }[style_constraints["rhetorical_style"]]
     
+    word_range_emphasis = ""
+    if enforce_word_range:
+        word_range_emphasis = (
+            f"\nCRITICAL: Your essay MUST be between {min_words} and {max_words} words. "
+            f"Count your words carefully and ensure you meet this requirement exactly."
+        )
+    
     return f"""You are a TOEFL test-taker writing an Independent Writing essay at {level} proficiency level.
 
 Requirements:
-- Write {min_words}-{max_words} words
+- Write {min_words}-{max_words} words{word_range_emphasis}
 - {spec['description']}
 - {stance_instruction}
 - {example_instruction}
@@ -149,7 +187,7 @@ CRITICAL: Output ONLY the essay text. Do NOT include:
 - A title
 - Bullet points
 - Numbered lists
-- Meta-commentary like "Here is my essay:"
+- Meta-commentary like "Here is my essay:", "Title:", "Essay:", etc.
 - Any text before or after the essay
 
 Start directly with your first sentence and end with your final sentence."""
@@ -170,6 +208,31 @@ Proficiency level: {level}
 Write your essay now (essay text only, no title or extra text):"""
 
 
+def clean_essay_text(text: str) -> str:
+    """
+    Clean up common formatting issues in generated text.
+    
+    This is a fallback; prefer retry over aggressive cleaning.
+    """
+    text = text.strip()
+    # Remove surrounding quotes
+    text = text.lstrip('"').rstrip('"')
+    # Remove common prefixes
+    if text.startswith("Essay:"):
+        text = text[6:].strip()
+    # Try to find actual essay start if meta-text detected
+    if has_meta_text(text):
+        lines = text.split("\n")
+        for i, line in enumerate(lines):
+            if len(line) > 50 and not any(
+                re.match(pattern, line.strip(), re.IGNORECASE)
+                for pattern in META_TEXT_PATTERNS
+            ):
+                text = "\n".join(lines[i:]).strip()
+                break
+    return text
+
+
 def generate_essay(
     client: OpenAI,
     prompt_text: str,
@@ -177,19 +240,40 @@ def generate_essay(
     model: str,
     temperature: float,
     style_constraints: Dict[str, str],
+    max_tokens: int = 1200,
     max_retries: int = 3,
+    word_range_retries: int = 2,
 ) -> Tuple[Optional[str], Optional[str]]:
     """
     Generate a single essay using Groq API.
     
+    Args:
+        word_range_retries: Additional retries if word count is out of range
+    
     Returns:
         (essay_text, error_message) - if error, essay_text is None
     """
-    system_prompt = build_system_prompt(level, style_constraints)
+    spec = LEVEL_SPECS[level]
+    min_words, max_words = spec["word_range"]
+    
+    # First attempt: standard prompt
+    system_prompt = build_system_prompt(level, style_constraints, enforce_word_range=False)
     user_prompt = build_user_prompt(prompt_text, level)
     
-    for attempt in range(max_retries):
+    total_attempts = max_retries + word_range_retries
+    word_range_attempts = 0
+    
+    for attempt in range(total_attempts):
         try:
+            # Use stronger word range enforcement after first failure
+            if attempt >= max_retries:
+                system_prompt = build_system_prompt(
+                    level, style_constraints, enforce_word_range=True
+                )
+                if word_range_attempts == 0:
+                    print(f"    ⚠️  Word count out of range, retrying with stronger instructions...")
+                word_range_attempts += 1
+            
             response = client.chat.completions.create(
                 model=model,
                 messages=[
@@ -197,22 +281,35 @@ def generate_essay(
                     {"role": "user", "content": user_prompt},
                 ],
                 temperature=temperature,
-                max_tokens=1200,  # Enough for ~320 words
+                max_tokens=max_tokens,
             )
             
             essay_text = response.choices[0].message.content.strip()
             
-            # Clean up common issues
-            essay_text = essay_text.lstrip('"').rstrip('"')
-            if essay_text.startswith("Essay:"):
-                essay_text = essay_text[6:].strip()
-            if essay_text.startswith("Here is"):
-                lines = essay_text.split("\n")
-                for i, line in enumerate(lines):
-                    if len(line) > 50 and not line.lower().startswith(("here", "this", "the following")):
-                        essay_text = "\n".join(lines[i:]).strip()
-                        break
+            # Check for meta-text (non-essay content)
+            if has_meta_text(essay_text):
+                if attempt < max_retries - 1:
+                    print(f"    ⚠️  Meta-text detected, retrying...")
+                    continue
+                else:
+                    # Last attempt: try to clean it
+                    essay_text = clean_essay_text(essay_text)
             
+            # Check word count
+            word_count = count_words(essay_text)
+            if word_count < min_words or word_count > max_words:
+                if attempt < total_attempts - 1:
+                    # Will retry with stronger word range enforcement
+                    continue
+                else:
+                    # Last attempt failed word count check
+                    return (
+                        None,
+                        f"Word count {word_count} outside range [{min_words}, {max_words}] after {total_attempts} attempts",
+                    )
+            
+            # Success: clean and return
+            essay_text = clean_essay_text(essay_text)
             return essay_text, None
             
         except openai.RateLimitError as e:
@@ -255,6 +352,7 @@ def create_placeholder_essay(prompt_text: str, level: str, style_constraints: Di
         f"{stance_text} with this statement. In this essay, I will explain my position and provide reasons to support my view.",
     ]
     
+    # Add body paragraphs with filler content to reach target word count
     example_count = style_constraints["example_count"]
     words_per_example = max(50, (target_words - 30) // (example_count + 1))
     
@@ -274,10 +372,13 @@ def create_placeholder_essay(prompt_text: str, level: str, style_constraints: Di
         example_text += f"For example, this is a key point that demonstrates my argument. "
         example_text += f"Additionally, this example shows why my position is valid. "
         
+        # Add filler sentences to reach target word count
+        needed_words = words_per_example - count_words(example_text)
         filler_idx = i % len(filler_sentences)
-        while count_words(example_text) < words_per_example:
+        while count_words(example_text) < words_per_example and needed_words > 0:
             example_text += filler_sentences[filler_idx % len(filler_sentences)] + " "
             filler_idx += 1
+            needed_words = words_per_example - count_words(example_text)
         
         paragraphs.append(example_text.strip())
     
@@ -292,9 +393,12 @@ def create_placeholder_essay(prompt_text: str, level: str, style_constraints: Di
     # Final adjustment: trim or pad with real words if needed
     current_words = count_words(essay)
     if current_words < target_words:
+        # Add more filler sentences
+        needed = target_words - current_words
         while count_words(essay) < target_words:
             essay += " " + filler_sentences[len(essay) % len(filler_sentences)]
     elif current_words > target_words:
+        # Trim to target
         words = essay.split()
         essay = " ".join(words[:target_words])
     
@@ -327,6 +431,7 @@ def save_essay(
         if json_path.exists() or txt_path.exists():
             return False, "File already exists (use --overwrite to replace)"
     
+    # Create JSON data
     json_data = {
         "id": essay_id,
         "prompt_id": prompt_id,
@@ -340,11 +445,16 @@ def save_essay(
     }
     
     try:
+        # Save JSON
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(json_data, f, indent=2, ensure_ascii=False)
+        
+        # Save TXT
         with open(txt_path, "w", encoding="utf-8") as f:
             f.write(essay_text)
+        
         return True, None
+    
     except Exception as e:
         return False, f"Failed to save files: {e}"
 
@@ -354,15 +464,50 @@ def main():
         description="Generate synthetic TOEFL essay dataset using Groq API",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--dry-run", action="store_true", help="Generate placeholder essays without calling API")
-    parser.add_argument("--seed", type=int, default=None, help="Random seed for style constraint variation")
-    parser.add_argument("--overwrite", action="store_true", help="Overwrite existing files")
-    parser.add_argument("--temperature", type=float, default=0.7, help="Temperature for generation (default: 0.7)")
-    parser.add_argument("--model", type=str, default=None, help="Model name (default: from GROQ_MODEL env var or 'llama-3.1-8b-instant')")
-    parser.add_argument("--output-dir", type=str, default="data/essays", help="Output directory (default: data/essays)")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Generate placeholder essays without calling API",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Random seed for style constraint variation",
+    )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Overwrite existing files",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.7,
+        help="Temperature for generation (default: 0.7)",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Model name (default: from GROQ_MODEL env var or 'llama-3.1-8b-instant')",
+    )
+    parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=1200,
+        help="Maximum tokens for generation (default: 1200, enough for ~320 words)",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="data/essays",
+        help="Output directory (default: data/essays)",
+    )
     
     args = parser.parse_args()
     
+    # Validate API key (unless dry-run)
     if not args.dry_run:
         api_key = os.getenv("GROQ_API_KEY")
         if not api_key:
@@ -370,16 +515,24 @@ def main():
             print("   Please set it in your .env file or export it.")
             sys.exit(1)
     
+    # Determine model
     model = args.model or os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+    
+    # Setup output directory
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
+    # Setup random seed if provided (for global randomization)
     if args.seed is not None:
         random.seed(args.seed)
     
+    # Initialize client (only if not dry-run)
     client = None
     if not args.dry_run:
-        client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=api_key)
+        client = OpenAI(
+            base_url="https://api.groq.com/openai/v1",
+            api_key=api_key,
+        )
         print(f"✅ Connected to Groq API (model: {model})")
     else:
         print("🔍 DRY-RUN mode: Generating placeholder essays")
@@ -387,8 +540,10 @@ def main():
     print(f"📁 Output directory: {output_dir.absolute()}")
     print(f"🌱 Seed: {args.seed if args.seed is not None else 'random'}")
     print(f"🌡️  Temperature: {args.temperature}")
+    print(f"🎯 Max tokens: {args.max_tokens}")
     print()
     
+    # Generate essays
     total = len(TOEFL_PROMPTS) * len(LEVEL_SPECS)
     success_count = 0
     skip_count = 0
@@ -397,10 +552,12 @@ def main():
     
     for prompt_idx, prompt_text in enumerate(TOEFL_PROMPTS, start=1):
         prompt_id = f"p{prompt_idx:02d}"
+        
         for level in ["B1", "B2", "C1"]:
             essay_id = f"{prompt_id}_{level.lower()}"
             print(f"📝 Generating {essay_id}...", end=" ", flush=True)
             
+            # Check if files exist
             json_path = output_dir / f"{essay_id}.json"
             txt_path = output_dir / f"{essay_id}.txt"
             if not args.overwrite and (json_path.exists() or txt_path.exists()):
@@ -408,17 +565,27 @@ def main():
                 skip_count += 1
                 continue
             
+            # Get style constraints with deterministic seed
             if args.seed is not None:
                 essay_seed = get_essay_seed(args.seed, prompt_idx, level)
             else:
                 essay_seed = None
             style_constraints = get_style_constraints(level, essay_seed)
             
+            # Generate essay
             if args.dry_run:
                 essay_text = create_placeholder_essay(prompt_text, level, style_constraints)
                 error_msg = None
             else:
-                essay_text, error_msg = generate_essay(client, prompt_text, level, model, args.temperature, style_constraints)
+                essay_text, error_msg = generate_essay(
+                    client,
+                    prompt_text,
+                    level,
+                    model,
+                    args.temperature,
+                    style_constraints,
+                    max_tokens=args.max_tokens,
+                )
             
             if error_msg:
                 print(f"❌ failed: {error_msg}")
@@ -426,8 +593,12 @@ def main():
                 errors.append((essay_id, error_msg))
                 continue
             
+            # Save essay
             word_count = count_words(essay_text)
-            success, save_error = save_essay(prompt_id, level, prompt_text, essay_text, model, output_dir, args.overwrite)
+            success, save_error = save_essay(
+                prompt_id, level, prompt_text, essay_text, model, output_dir, args.overwrite
+            )
+            
             if not success:
                 print(f"❌ save failed: {save_error}")
                 error_count += 1
@@ -437,6 +608,7 @@ def main():
             print(f"✅ done ({word_count} words)")
             success_count += 1
     
+    # Summary
     print()
     print("=" * 60)
     print("📊 SUMMARY")
@@ -445,11 +617,13 @@ def main():
     print(f"✅ Success: {success_count}")
     print(f"⏭️  Skipped: {skip_count}")
     print(f"❌ Errors: {error_count}")
+    
     if errors:
         print()
         print("Errors encountered:")
-        for eid, emsg in errors:
-            print(f"  - {eid}: {emsg}")
+        for essay_id, error_msg in errors:
+            print(f"  - {essay_id}: {error_msg}")
+    
     if success_count > 0:
         print()
         print(f"✅ Essays saved to: {output_dir.absolute()}")
