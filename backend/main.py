@@ -106,6 +106,7 @@ class WeaknessItem(BaseModel):
     label: str
     explanation: str
     evidence: str | None = None
+    evidence_reason: str | None = None  # when evidence is null, e.g. "conceptual issue, not tied to a single sentence"
 
 
 class EvaluateResponseDetailed(BaseModel):
@@ -157,11 +158,11 @@ Required keys (exact names):
 - "estimated_score": number 0-30
 - "subscores": object with "task_response", "coherence_cohesion", "lexical_resource", "grammar" (each number 0-5)
 - "strengths": array of objects. Each object MUST have exactly three keys: "label" (string, short title), "explanation" (string, brief reason), "evidence" (string or null). For "evidence": copy an exact phrase from the student's essay that shows this strength (max 20 words), or use null if no clear quote fits.
-- "weaknesses": array of objects. Each object MUST have "label", "explanation", "evidence". "evidence" must be an exact quote from the essay (max 20 words) or null.
+- "weaknesses": array of objects. Each MUST have "label", "explanation", "evidence" (exact quote from essay, max 20 words, or null). When evidence is null, include "evidence_reason" (short string explaining why, e.g. "conceptual issue, not tied to a single sentence" or "repeated across paragraphs").
 - "top_fixes": array of exactly 3 strings (most important fixes)
 - "rewrite_first_paragraph": string (revised first paragraph of the essay)
 
-Important: "evidence" must be a verbatim substring of the essay text. No paraphrasing. If in doubt, use null. Output only the raw JSON object, nothing else."""
+Important: "evidence" must be a verbatim substring of the essay. When you cannot quote exactly, set evidence to null and set "evidence_reason". Output only the raw JSON object, nothing else."""
 
 
 def _build_user_prompt(prompt: str, essay: str) -> str:
@@ -264,7 +265,7 @@ def _validate_and_shape_detailed(raw: dict[str, Any], essay: str) -> dict[str, A
         if not isinstance(rewrite, str):
             return None
 
-        def parse_item(item: Any, essay_text: str) -> dict[str, str | None] | None:
+        def parse_strength_item(item: Any, essay_text: str) -> dict[str, str | None] | None:
             if not isinstance(item, dict):
                 return None
             label = item.get("label")
@@ -277,12 +278,29 @@ def _validate_and_shape_detailed(raw: dict[str, Any], essay: str) -> dict[str, A
             )
             return {"label": label, "explanation": explanation, "evidence": evidence_clean}
 
+        def parse_weakness_item(item: Any, essay_text: str) -> dict[str, str | None] | None:
+            if not isinstance(item, dict):
+                return None
+            label = item.get("label")
+            explanation = item.get("explanation")
+            evidence = item.get("evidence")
+            evidence_reason = item.get("evidence_reason")
+            if not isinstance(label, str) or not isinstance(explanation, str):
+                return None
+            evidence_clean = _ensure_evidence_substring(
+                evidence if isinstance(evidence, str) else None, essay_text
+            )
+            reason = evidence_reason if isinstance(evidence_reason, str) and evidence_reason.strip() else None
+            if evidence_clean is None and reason is None:
+                reason = "Not an exact quote from the essay"
+            return {"label": label, "explanation": explanation, "evidence": evidence_clean, "evidence_reason": reason}
+
         strengths_raw = raw.get("strengths")
         weaknesses_raw = raw.get("weaknesses")
         if not isinstance(strengths_raw, list) or not isinstance(weaknesses_raw, list):
             return None
-        strengths = [parse_item(s, essay) for s in strengths_raw]
-        weaknesses = [parse_item(w, essay) for w in weaknesses_raw]
+        strengths = [parse_strength_item(s, essay) for s in strengths_raw]
+        weaknesses = [parse_weakness_item(w, essay) for w in weaknesses_raw]
         if None in strengths or None in weaknesses:
             return None
         strengths = [s for s in strengths if s is not None]

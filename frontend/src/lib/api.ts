@@ -22,11 +22,12 @@ export interface Confidence {
   reason: string
 }
 
-/** Detailed strength/weakness item (when using ?detailed=true) */
+/** Detailed strength/weakness item (when using ?detailed=true). Weaknesses may include evidence_reason when evidence is null. */
 export interface StrengthWeaknessItem {
   label: string
   explanation: string
   evidence: string | null
+  evidence_reason?: string | null
 }
 
 export interface EvaluateResponse {

@@ -266,10 +266,14 @@ export default function App() {
                 {isDetailedItem(w) ? (
                   <>
                     <strong>{w.label}</strong>: {w.explanation}
-                    {w.evidence != null && w.evidence !== '' && (
+                    {w.evidence != null && w.evidence !== '' ? (
                       <blockquote style={{ margin: '4px 0 0', fontSize: '0.9em', color: '#555' }}>
                         "{w.evidence}"
                       </blockquote>
+                    ) : (
+                      <p style={{ margin: '4px 0 0', fontSize: '0.85em', color: '#888' }}>
+                        No direct quote available{w.evidence_reason ? ` — ${w.evidence_reason}` : ''}
+                      </p>
                     )}
                   </>
                 ) : (
