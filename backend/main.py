@@ -156,12 +156,12 @@ Output only the raw JSON object, nothing else."""
 Required keys (exact names):
 - "estimated_score": number 0-30
 - "subscores": object with "task_response", "coherence_cohesion", "lexical_resource", "grammar" (each number 0-5)
-- "strengths": array of objects, each with "label" (string), "explanation" (string), "evidence" (string or null). "label" is a short title for the strength. "explanation" is a brief explanation. "evidence" MUST be an exact substring copied from the student's essay (max 20 words), or null if no clear quote fits.
-- "weaknesses": array of objects, each with "label", "explanation", "evidence". Same rules: "evidence" is an exact quote from the essay (max 20 words) or null.
+- "strengths": array of objects. Each object MUST have exactly three keys: "label" (string, short title), "explanation" (string, brief reason), "evidence" (string or null). For "evidence": copy an exact phrase from the student's essay that shows this strength (max 20 words), or use null if no clear quote fits.
+- "weaknesses": array of objects. Each object MUST have "label", "explanation", "evidence". "evidence" must be an exact quote from the essay (max 20 words) or null.
 - "top_fixes": array of exactly 3 strings (most important fixes)
 - "rewrite_first_paragraph": string (revised first paragraph of the essay)
 
-Evidence must be copied character-for-character from the essay; if no suitable phrase exists, use null. Output only the raw JSON object, nothing else."""
+Important: "evidence" must be a verbatim substring of the essay text. No paraphrasing. If in doubt, use null. Output only the raw JSON object, nothing else."""
 
 
 def _build_user_prompt(prompt: str, essay: str) -> str:
@@ -373,12 +373,13 @@ def evaluate(
         )
 
     latency_ms = (time.perf_counter_ns() - start) // 1_000_000
+    subscores_obj = Subscores(**shaped["subscores"])
 
     if detailed:
-        return EvaluateResponseDetailed(
+        out = EvaluateResponseDetailed(
             model=GROQ_MODEL,
             estimated_score=shaped["estimated_score"],
-            subscores=Subscores(**shaped["subscores"]),
+            subscores=subscores_obj,
             strengths=[StrengthItem(**s) for s in shaped["strengths"]],
             weaknesses=[WeaknessItem(**w) for w in shaped["weaknesses"]],
             top_fixes=shaped["top_fixes"],
@@ -386,10 +387,11 @@ def evaluate(
             word_count=words,
             latency_ms=latency_ms,
         )
+        return out
     return EvaluateResponse(
         model=GROQ_MODEL,
         estimated_score=shaped["estimated_score"],
-        subscores=Subscores(**shaped["subscores"]),
+        subscores=subscores_obj,
         strengths=shaped["strengths"],
         weaknesses=shaped["weaknesses"],
         top_fixes=shaped["top_fixes"],

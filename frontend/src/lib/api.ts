@@ -17,12 +17,26 @@ export interface Subscores {
   grammar: number
 }
 
+export interface Confidence {
+  level: 'Low' | 'Medium' | 'High'
+  reason: string
+}
+
+/** Detailed strength/weakness item (when using ?detailed=true) */
+export interface StrengthWeaknessItem {
+  label: string
+  explanation: string
+  evidence: string | null
+}
+
 export interface EvaluateResponse {
   model: string
   estimated_score: number
   subscores: Subscores
-  strengths: string[]
-  weaknesses: string[]
+  confidence?: Confidence
+  /** Legacy: string[]. With ?detailed=true: StrengthWeaknessItem[] */
+  strengths: string[] | StrengthWeaknessItem[]
+  weaknesses: string[] | StrengthWeaknessItem[]
   top_fixes: string[]
   rewrite_first_paragraph: string
   word_count: number
@@ -42,10 +56,12 @@ export class EvaluateError extends Error {
 
 /**
  * POST /api/evaluate with { prompt, essay }.
+ * Uses ?detailed=true to get strengths/weaknesses as { label, explanation, evidence }.
  * Throws EvaluateError on non-2xx, network, or JSON parse errors.
  */
 export async function evaluateEssay(payload: EvaluatePayload): Promise<EvaluateResponse> {
-  const url = API_BASE ? `${API_BASE.replace(/\/$/, '')}/api/evaluate` : '/api/evaluate'
+  const base = API_BASE ? `${API_BASE.replace(/\/$/, '')}/api/evaluate` : '/api/evaluate'
+  const url = `${base}?detailed=true`
   let res: Response
 
   try {

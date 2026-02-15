@@ -1,11 +1,15 @@
 import { useState, FormEvent } from 'react'
 import { TOEFL_PROMPTS } from './prompts'
-import { evaluateEssay, EvaluateError, type EvaluateResponse } from './lib/api'
+import { evaluateEssay, EvaluateError, type EvaluateResponse, type StrengthWeaknessItem } from './lib/api'
 
 const MIN_WORDS = 150
 
 function wordCount(text: string): number {
   return text.trim() ? text.trim().split(/\s+/).length : 0
+}
+
+function isDetailedItem(x: string | StrengthWeaknessItem): x is StrengthWeaknessItem {
+  return typeof x === 'object' && x !== null && 'label' in x && 'explanation' in x
 }
 
 const styles: Record<string, React.CSSProperties> = {
@@ -212,6 +216,7 @@ export default function App() {
           <h2 style={styles.resultTitle}>Feedback</h2>
           <p style={styles.meta}>
             Model: {result.model} · {result.latency_ms} ms · {result.word_count} words
+            {result.confidence && ` · Confidence: ${result.confidence.level}`}
           </p>
 
           <div style={styles.scoreBox}>
@@ -238,7 +243,18 @@ export default function App() {
           <ul style={styles.list}>
             {result.strengths.map((s, i) => (
               <li key={i} style={styles.listItem}>
-                {s}
+                {isDetailedItem(s) ? (
+                  <>
+                    <strong>{s.label}</strong>: {s.explanation}
+                    {s.evidence != null && s.evidence !== '' && (
+                      <blockquote style={{ margin: '4px 0 0', fontSize: '0.9em', color: '#555' }}>
+                        "{s.evidence}"
+                      </blockquote>
+                    )}
+                  </>
+                ) : (
+                  String(s)
+                )}
               </li>
             ))}
           </ul>
@@ -247,7 +263,18 @@ export default function App() {
           <ul style={styles.list}>
             {result.weaknesses.map((w, i) => (
               <li key={i} style={styles.listItem}>
-                {w}
+                {isDetailedItem(w) ? (
+                  <>
+                    <strong>{w.label}</strong>: {w.explanation}
+                    {w.evidence != null && w.evidence !== '' && (
+                      <blockquote style={{ margin: '4px 0 0', fontSize: '0.9em', color: '#555' }}>
+                        "{w.evidence}"
+                      </blockquote>
+                    )}
+                  </>
+                ) : (
+                  String(w)
+                )}
               </li>
             ))}
           </ul>
