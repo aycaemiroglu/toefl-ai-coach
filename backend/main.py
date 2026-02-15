@@ -37,12 +37,15 @@ Example detailed response (POST /api/evaluate?detailed=true):
 }
 """
 import json
+import logging
 import os
 import re
 import time
 from typing import Any
 
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
@@ -158,11 +161,11 @@ Required keys (exact names):
 - "estimated_score": number 0-30
 - "subscores": object with "task_response", "coherence_cohesion", "lexical_resource", "grammar" (each number 0-5)
 - "strengths": array of objects. Each object MUST have exactly three keys: "label" (string, short title), "explanation" (string, brief reason), "evidence" (string or null). For "evidence": copy an exact phrase from the student's essay that shows this strength (max 20 words), or use null if no clear quote fits.
-- "weaknesses": array of objects. Each MUST have "label", "explanation", "evidence" (exact quote from essay, max 20 words, or null). When evidence is null, include "evidence_reason" (short string explaining why, e.g. "conceptual issue, not tied to a single sentence" or "repeated across paragraphs").
+- "weaknesses": array of objects. Each MUST have "label", "explanation", "evidence", and optionally "evidence_reason". For "evidence": you MUST attempt to extract ONE full sentence from the essay that best demonstrates the weakness. The sentence must be an exact verbatim substring (copy character-for-character), max 25 words. If the weakness relates to repetition, simple vocabulary, or sentence structure, you MUST select the exact sentence that shows this. If no single sentence clearly demonstrates the issue (e.g. conceptual or organizational), set "evidence" to null and set "evidence_reason" to exactly: "Conceptual issue not tied to a single sentence."
 - "top_fixes": array of exactly 3 strings (most important fixes)
 - "rewrite_first_paragraph": string (revised first paragraph of the essay)
 
-Important: "evidence" must be a verbatim substring of the essay. When you cannot quote exactly, set evidence to null and set "evidence_reason". Output only the raw JSON object, nothing else."""
+Important: weakness "evidence" must be one full sentence, verbatim from the essay, max 25 words. For repetition, word choice, or grammar/structure weaknesses, always provide the exact sentence. Only use evidence=null when the issue cannot be shown by one sentence. Output only the raw JSON object, nothing else."""
 
 
 def _build_user_prompt(prompt: str, essay: str) -> str:
@@ -226,7 +229,9 @@ def _validate_and_shape(raw: dict[str, Any]) -> dict[str, Any] | None:
         return None
 
 
-def _ensure_evidence_substring(evidence: str | None, essay: str, max_words: int = 20) -> str | None:
+def _ensure_evidence_substring(
+    evidence: str | None, essay: str, max_words: int = 20, log_reject: bool = False
+) -> str | None:
     """If evidence is not an exact substring of essay (or too long), return None."""
     if not evidence or not isinstance(evidence, str):
         return None
@@ -234,8 +239,14 @@ def _ensure_evidence_substring(evidence: str | None, essay: str, max_words: int 
     if not evidence:
         return None
     if len(evidence.split()) > max_words:
+        if log_reject:
+            logger.info("Evidence rejected (over %d words): %r", max_words, evidence[:100])
         return None
-    return evidence if evidence in essay else None
+    if evidence not in essay:
+        if log_reject:
+            logger.info("Evidence rejected (not exact substring): %r", evidence[:100])
+        return None
+    return evidence
 
 
 def _validate_and_shape_detailed(raw: dict[str, Any], essay: str) -> dict[str, Any] | None:
@@ -288,11 +299,14 @@ def _validate_and_shape_detailed(raw: dict[str, Any], essay: str) -> dict[str, A
             if not isinstance(label, str) or not isinstance(explanation, str):
                 return None
             evidence_clean = _ensure_evidence_substring(
-                evidence if isinstance(evidence, str) else None, essay_text
+                evidence if isinstance(evidence, str) else None,
+                essay_text,
+                max_words=25,
+                log_reject=True,
             )
             reason = evidence_reason if isinstance(evidence_reason, str) and evidence_reason.strip() else None
             if evidence_clean is None and reason is None:
-                reason = "Not an exact quote from the essay"
+                reason = "Conceptual issue not tied to a single sentence."
             return {"label": label, "explanation": explanation, "evidence": evidence_clean, "evidence_reason": reason}
 
         strengths_raw = raw.get("strengths")
