@@ -32,6 +32,10 @@ data/essays/
 results/*.png
 results/*.json
 
+# Frontend (React)
+frontend/node_modules/
+frontend/dist/
+
 # IDE (extensions.json is committed for recommended extensions)
 .vscode/*
 !.vscode/extensions.json
