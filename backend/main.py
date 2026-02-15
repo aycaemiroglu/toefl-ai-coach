@@ -25,9 +25,10 @@ Example detailed response (POST /api/evaluate?detailed=true):
   ],
   "weaknesses": [
     {
-      "label": "Repetition",
-      "explanation": "The word 'clearly' is overused.",
-      "evidence": "Clearly, this shows that clearly we need"
+      "label": "Overuse of simple vocabulary",
+      "explanation": "Words like 'very' and 'important' are repeated.",
+      "evidence": "Technology is very important and very useful in our daily lives.",
+      "evidence_reason": null
     }
   ],
   "top_fixes": ["Vary transition words", "Add one counter-argument", "Shorten run-on in paragraph 2"],
@@ -141,6 +142,75 @@ def word_count(text: str) -> int:
     return len(text.split())
 
 
+# --- Quote normalization (smart quotes → ASCII) for substring checks ---
+def _normalize_quotes(s: str) -> str:
+    if not s:
+        return s
+    return (
+        s.replace("\u201c", '"')
+        .replace("\u201d", '"')
+        .replace("\u2018", "'")
+        .replace("\u2019", "'")
+    )
+
+
+# --- Lexical evidence extraction (server-side) ---
+_STOPWORDS = frozenset(
+    "the a an is are was were be been being have has had do does did will would could "
+    "should may might must can to of in for on with at by from as it its that this "
+    "and or but if then else when so i you we they he she it".split()
+)
+
+
+def _tokenize_words(text: str) -> list[str]:
+    """Lowercased words, split on non-letters."""
+    return re.findall(r"[a-z]+", text.lower())
+
+
+def _get_repeated_content_words(essay: str, min_count: int = 2, top_n: int = 10) -> list[tuple[str, int]]:
+    """Top repeated content words (exclude stopwords), sorted by count descending."""
+    words = _tokenize_words(essay)
+    counts: dict[str, int] = {}
+    for w in words:
+        if w not in _STOPWORDS and len(w) > 1:
+            counts[w] = counts.get(w, 0) + 1
+    repeated = [(w, c) for w, c in counts.items() if c >= min_count]
+    repeated.sort(key=lambda x: -x[1])
+    return repeated[:top_n]
+
+
+def _get_sentences(essay: str) -> list[str]:
+    """Split into sentences (exact substrings of essay)."""
+    parts = re.split(r"(?<=[.!?])\s+", essay)
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _get_lexical_evidence(essay: str, max_words: int = 25) -> tuple[str | None, list[str]]:
+    """
+    Find one sentence that best demonstrates repeated/simple vocabulary.
+    Returns (sentence_or_none, list_of_repeated_words_that_triggered).
+    Sentence is exact substring of essay, <= max_words.
+    """
+    repeated = _get_repeated_content_words(essay)
+    if not repeated:
+        return None, []
+    trigger_words = [w for w, _ in repeated]
+    sentences = _get_sentences(essay)
+    best: str | None = None
+    best_count = 0
+    for sent in sentences:
+        if len(sent.split()) > max_words:
+            continue
+        words_in_sent = set(_tokenize_words(sent)) - _STOPWORDS
+        overlap = sum(1 for w, _ in repeated if w in words_in_sent)
+        if overlap > best_count:
+            best_count = overlap
+            best = sent
+    if best and best_count > 0:
+        return best, trigger_words[:5]
+    return None, []
+
+
 def _build_system_prompt(detailed: bool = False) -> str:
     if not detailed:
         return """You are a TOEFL Independent Writing rater. Output ONLY one valid JSON object with no other text, no markdown, no code fence.
@@ -161,11 +231,11 @@ Required keys (exact names):
 - "estimated_score": number 0-30
 - "subscores": object with "task_response", "coherence_cohesion", "lexical_resource", "grammar" (each number 0-5)
 - "strengths": array of objects. Each object MUST have exactly three keys: "label" (string, short title), "explanation" (string, brief reason), "evidence" (string or null). For "evidence": copy an exact phrase from the student's essay that shows this strength (max 20 words), or use null if no clear quote fits.
-- "weaknesses": array of objects. Each MUST have "label", "explanation", "evidence", and optionally "evidence_reason". For "evidence": you MUST attempt to extract ONE full sentence from the essay that best demonstrates the weakness. The sentence must be an exact verbatim substring (copy character-for-character), max 25 words. If the weakness relates to repetition, simple vocabulary, or sentence structure, you MUST select the exact sentence that shows this. If no single sentence clearly demonstrates the issue (e.g. conceptual or organizational), set "evidence" to null and set "evidence_reason" to exactly: "Conceptual issue not tied to a single sentence."
+- "weaknesses": array of objects. Each MUST have "label", "explanation", "evidence", and optionally "evidence_reason". For "evidence": select ONE full sentence from the essay that is the MOST representative of the weakness. Choose the strongest and most obvious sentence demonstrating the issue. Prefer sentences that clearly show repetition, shallow reasoning, or structural weakness; avoid neutral or generic sentences. If multiple sentences qualify, choose the one with the strongest linguistic signal. The sentence must be an exact verbatim substring (copy character-for-character), max 25 words. If the weakness relates to repetition, simple vocabulary, or sentence structure, you MUST select the exact sentence that shows this. If no single sentence clearly demonstrates the issue (e.g. conceptual or organizational), set "evidence" to null and set "evidence_reason" to exactly: "Conceptual issue not tied to a single sentence."
 - "top_fixes": array of exactly 3 strings (most important fixes)
 - "rewrite_first_paragraph": string (revised first paragraph of the essay)
 
-Important: weakness "evidence" must be one full sentence, verbatim from the essay, max 25 words. For repetition, word choice, or grammar/structure weaknesses, always provide the exact sentence. Only use evidence=null when the issue cannot be shown by one sentence. Output only the raw JSON object, nothing else."""
+Important: weakness "evidence" must be one full sentence, verbatim from the essay, max 25 words. Choose the strongest and most obvious sentence demonstrating the issue. For repetition, word choice, or grammar/structure weaknesses, always provide the exact sentence. Only use evidence=null when the issue cannot be shown by one sentence. Output only the raw JSON object, nothing else."""
 
 
 def _build_user_prompt(prompt: str, essay: str) -> str:
@@ -232,7 +302,7 @@ def _validate_and_shape(raw: dict[str, Any]) -> dict[str, Any] | None:
 def _ensure_evidence_substring(
     evidence: str | None, essay: str, max_words: int = 20, log_reject: bool = False
 ) -> str | None:
-    """If evidence is not an exact substring of essay (or too long), return None."""
+    """If evidence is not an exact substring of essay (or too long), return None. Normalizes smart quotes for check."""
     if not evidence or not isinstance(evidence, str):
         return None
     evidence = evidence.strip()
@@ -242,11 +312,16 @@ def _ensure_evidence_substring(
         if log_reject:
             logger.info("Evidence rejected (over %d words): %r", max_words, evidence[:100])
         return None
-    if evidence not in essay:
+    norm_essay = _normalize_quotes(essay)
+    norm_evidence = _normalize_quotes(evidence)
+    if norm_evidence not in norm_essay:
         if log_reject:
             logger.info("Evidence rejected (not exact substring): %r", evidence[:100])
         return None
-    return evidence
+    # Return slice from original essay so response is exact substring
+    start = norm_essay.find(norm_evidence)
+    end = start + len(norm_evidence)
+    return essay[start:end]
 
 
 def _validate_and_shape_detailed(raw: dict[str, Any], essay: str) -> dict[str, Any] | None:
@@ -319,6 +394,27 @@ def _validate_and_shape_detailed(raw: dict[str, Any], essay: str) -> dict[str, A
             return None
         strengths = [s for s in strengths if s is not None]
         weaknesses = [w for w in weaknesses if w is not None]
+
+        # Server-side evidence for lexical weakness when LLM returned null
+        _LEXICAL_LABEL_KEYWORDS = ("simple vocabulary", "repetition", "limited lexical", "lexical variety", "word choice", "overuse")
+        lexical_evidence, trigger_words = _get_lexical_evidence(essay, max_words=25)
+        for w in weaknesses:
+            if w.get("evidence") is not None:
+                continue
+            label_lower = (w.get("label") or "").lower()
+            if not any(kw in label_lower for kw in _LEXICAL_LABEL_KEYWORDS):
+                continue
+            if lexical_evidence and len(lexical_evidence.split()) <= 25:
+                # Ensure it's substring (already is from _get_sentences)
+                if lexical_evidence.strip() in essay or _normalize_quotes(lexical_evidence.strip()) in _normalize_quotes(essay):
+                    w["evidence"] = lexical_evidence.strip()
+                    w["evidence_reason"] = None
+                    logger.info(
+                        "evidence_overridden=true | lexical weakness: label=%r, trigger_words=%s, evidence=%r",
+                        w.get("label"),
+                        trigger_words,
+                        lexical_evidence[:60],
+                    )
 
         return {
             "estimated_score": score,
