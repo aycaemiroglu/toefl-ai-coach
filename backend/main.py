@@ -135,12 +135,21 @@ class Calibration(BaseModel):
     note: str
 
 
+LengthTier = Literal["short", "recommended", "ideal"]
+
+
+class LengthEvaluation(BaseModel):
+    tier: LengthTier
+    message: str
+
+
 # --- Legacy (flat lists) ---
 class EvaluateResponse(BaseModel):
     model: str
     estimated_score: float = Field(..., ge=0, le=30)
     subscores: Subscores
     calibration: Calibration
+    length_evaluation: LengthEvaluation
     confidence: Confidence
     strengths: list[str]
     weaknesses: list[str]
@@ -169,6 +178,7 @@ class EvaluateResponseDetailed(BaseModel):
     estimated_score: float = Field(..., ge=0, le=30)
     subscores: Subscores
     calibration: Calibration
+    length_evaluation: LengthEvaluation
     confidence: Confidence
     strengths: list[StrengthItem]
     weaknesses: list[WeaknessItem]
@@ -193,6 +203,15 @@ app.add_middleware(
 
 def word_count(text: str) -> int:
     return len(text.split())
+
+
+# --- Length evaluation (deterministic, server-side only) ---
+def _compute_length_evaluation(wc: int) -> LengthEvaluation:
+    if wc < RECOMMENDED_WORDS:
+        return LengthEvaluation(tier="short", message="Below recommended length; score calibrated.")
+    if wc < FULL_CONFIDENCE_WORDS:
+        return LengthEvaluation(tier="recommended", message="Meets recommended length; full score applied.")
+    return LengthEvaluation(tier="ideal", message="Ideal length range; maximum confidence.")
 
 
 # --- Length-based score calibration (server-side only) ---
@@ -708,6 +727,7 @@ def evaluate(
     calibration = _compute_calibration(words, raw_score)
     calibrated_score = calibration.calibrated_score
     calibration_delta = raw_score - calibrated_score
+    length_evaluation = _compute_length_evaluation(words)
 
     # Normalize weaknesses for confidence computation
     if detailed:
@@ -726,6 +746,7 @@ def evaluate(
             estimated_score=calibrated_score,
             subscores=subscores_obj,
             calibration=calibration,
+            length_evaluation=length_evaluation,
             confidence=confidence,
             strengths=[StrengthItem(**s) for s in shaped["strengths"]],
             weaknesses=[WeaknessItem(**w) for w in shaped["weaknesses"]],
@@ -740,6 +761,7 @@ def evaluate(
         estimated_score=calibrated_score,
         subscores=subscores_obj,
         calibration=calibration,
+        length_evaluation=length_evaluation,
         confidence=confidence,
         strengths=shaped["strengths"],
         weaknesses=shaped["weaknesses"],

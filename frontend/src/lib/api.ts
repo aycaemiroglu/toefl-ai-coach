@@ -42,6 +42,11 @@ export interface Calibration {
   note: string
 }
 
+export interface LengthEvaluation {
+  tier: 'short' | 'recommended' | 'ideal'
+  message: string
+}
+
 /** Detailed strength/weakness item (when using ?detailed=true). Weaknesses may include evidence_reason when evidence is null. */
 export interface StrengthWeaknessItem {
   label: string
@@ -55,6 +60,7 @@ export interface EvaluateResponse {
   estimated_score: number
   subscores: Subscores
   calibration: Calibration
+  length_evaluation: LengthEvaluation
   confidence: Confidence
   /** Legacy: string[]. With ?detailed=true: StrengthWeaknessItem[] */
   strengths: string[] | StrengthWeaknessItem[]

@@ -142,6 +142,15 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#64748b',
     fontStyle: 'italic',
   },
+  lengthMessage: {
+    marginTop: 6,
+    fontSize: '0.85rem',
+    color: '#475569',
+    padding: '4px 8px',
+    background: '#f1f5f9',
+    borderRadius: 4,
+    borderLeft: '3px solid #94a3b8',
+  },
 }
 
 type Status = 'idle' | 'loading' | 'success' | 'error'
@@ -290,6 +299,11 @@ export default function App() {
             {result.calibration && result.calibration.length_factor < 1 && (
               <div style={styles.calibrationNote}>
                 {result.calibration.note} (Raw: {result.calibration.raw_score.toFixed(1)}, ×{result.calibration.length_factor.toFixed(2)})
+              </div>
+            )}
+            {result.length_evaluation && (
+              <div style={styles.lengthMessage}>
+                {result.length_evaluation.message}
               </div>
             )}
             {result.confidence && (
