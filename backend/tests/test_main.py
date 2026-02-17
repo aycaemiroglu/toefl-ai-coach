@@ -21,11 +21,13 @@ if str(_backend) not in sys.path:
     sys.path.insert(0, str(_backend))
 
 from main import (
+    FULL_CONFIDENCE_WORDS,
     MIN_WORDS,
     RECOMMENDED_WORDS,
     Subscores,
     _compute_calibration,
     _compute_confidence,
+    _compute_length_evaluation,
     app,
     word_count,
 )
@@ -195,6 +197,32 @@ class TestComputeCalibration:
         assert not hasattr(cal, "subscores")
 
 
+# --- Length evaluation -----------------------------------------------------------
+class TestComputeLengthEvaluation:
+    def test_short_tier(self):
+        le = _compute_length_evaluation(150)
+        assert le.tier == "short"
+        assert "calibrated" in le.message.lower()
+
+    def test_recommended_tier(self):
+        le = _compute_length_evaluation(220)
+        assert le.tier == "recommended"
+        assert "full score" in le.message.lower()
+
+    def test_recommended_tier_upper_bound(self):
+        le = _compute_length_evaluation(249)
+        assert le.tier == "recommended"
+
+    def test_ideal_tier(self):
+        le = _compute_length_evaluation(250)
+        assert le.tier == "ideal"
+        assert "maximum confidence" in le.message.lower()
+
+    def test_ideal_tier_long(self):
+        le = _compute_length_evaluation(400)
+        assert le.tier == "ideal"
+
+
 class TestCalibrationConfidenceIntegration:
     def test_calibration_delta_adds_confidence_reason(self):
         """If calibration reduces score by >= 2 and word_count < 220, confidence gets a reason."""
@@ -283,6 +311,10 @@ class TestEvaluateEndpoint:
         assert cal["length_factor"] < 1.0
         assert cal["recommended_words"] == RECOMMENDED_WORDS
         assert "note" in cal
+        # Length evaluation present
+        le = data["length_evaluation"]
+        assert le["tier"] == "short"
+        assert "calibrated" in le["message"].lower()
         # Confidence still present
         assert "confidence" in data
         assert data["confidence"]["level"] in ("Low", "Medium", "High")
@@ -316,3 +348,4 @@ class TestEvaluateEndpoint:
         assert data["estimated_score"] == 24.0
         assert data["calibration"]["length_factor"] == 1.0
         assert data["calibration"]["raw_score"] == data["calibration"]["calibrated_score"]
+        assert data["length_evaluation"]["tier"] == "ideal"
