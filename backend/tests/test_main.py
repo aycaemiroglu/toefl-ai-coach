@@ -22,7 +22,9 @@ if str(_backend) not in sys.path:
 
 from main import (
     MIN_WORDS,
+    RECOMMENDED_WORDS,
     Subscores,
+    _compute_calibration,
     _compute_confidence,
     app,
     word_count,
@@ -149,6 +151,85 @@ class TestComputeConfidence:
         assert conf.signals.has_counterargument_weakness is True
 
 
+# --- Calibration -----------------------------------------------------------------
+class TestComputeCalibration:
+    def test_long_essay_no_penalty(self):
+        cal = _compute_calibration(250, 26.0)
+        assert cal.length_factor == 1.0
+        assert cal.calibrated_score == 26.0
+        assert cal.raw_score == 26.0
+        assert "no score adjustment" in cal.note.lower()
+
+    def test_exactly_recommended_words(self):
+        cal = _compute_calibration(RECOMMENDED_WORDS, 24.0)
+        assert cal.length_factor == 1.0
+        assert cal.calibrated_score == 24.0
+
+    def test_short_essay_penalty(self):
+        cal = _compute_calibration(110, 26.0)
+        assert cal.length_factor == round(110 / RECOMMENDED_WORDS, 4)
+        assert cal.calibrated_score == round(26.0 * (110 / RECOMMENDED_WORDS), 1)
+        assert cal.calibrated_score == 13.0
+
+    def test_moderately_short_essay(self):
+        cal = _compute_calibration(200, 24.0)
+        expected_factor = round(200 / RECOMMENDED_WORDS, 4)
+        assert cal.length_factor == expected_factor
+        expected_score = round(24.0 * (200 / RECOMMENDED_WORDS), 1)
+        assert cal.calibrated_score == expected_score
+        assert "shorter than recommended" in cal.note.lower()
+
+    def test_very_short_essay_note(self):
+        cal = _compute_calibration(150, 20.0)
+        assert "significantly shorter" in cal.note.lower()
+
+    def test_calibrated_score_clamped(self):
+        cal = _compute_calibration(50, 30.0)
+        assert 0 <= cal.calibrated_score <= 30
+        cal2 = _compute_calibration(300, 0.0)
+        assert cal2.calibrated_score == 0.0
+
+    def test_subscores_not_in_calibration(self):
+        """Calibration only touches final score, not subscores."""
+        cal = _compute_calibration(150, 24.0)
+        assert not hasattr(cal, "subscores")
+
+
+class TestCalibrationConfidenceIntegration:
+    def test_calibration_delta_adds_confidence_reason(self):
+        """If calibration reduces score by >= 2 and word_count < 220, confidence gets a reason."""
+        subscores = Subscores(
+            task_response=4.0,
+            coherence_cohesion=4.0,
+            lexical_resource=4.0,
+            grammar=4.0,
+        )
+        conf = _compute_confidence(
+            word_count=180,
+            subscores=subscores,
+            final_score=24.0,
+            weaknesses=[],
+            calibration_delta=4.4,
+        )
+        assert any("calibration" in r.lower() for r in conf.reasons)
+
+    def test_no_calibration_penalty_when_long_enough(self):
+        subscores = Subscores(
+            task_response=4.0,
+            coherence_cohesion=4.0,
+            lexical_resource=4.0,
+            grammar=4.0,
+        )
+        conf = _compute_confidence(
+            word_count=250,
+            subscores=subscores,
+            final_score=24.0,
+            weaknesses=[],
+            calibration_delta=0.0,
+        )
+        assert not any("calibration" in r.lower() for r in conf.reasons)
+
+
 # --- API -------------------------------------------------------------------------
 class TestEvaluateEndpoint:
     @pytest.fixture
@@ -193,9 +274,45 @@ class TestEvaluateEndpoint:
         assert r.status_code == 200
         data = r.json()
         assert data["word_count"] == 120
-        assert data["estimated_score"] == 24.0
+        # estimated_score is now calibrated (120/220 * 24 ≈ 13.1)
+        assert data["estimated_score"] < 24.0
+        # Calibration object present
+        cal = data["calibration"]
+        assert cal["raw_score"] == 24.0
+        assert cal["calibrated_score"] == data["estimated_score"]
+        assert cal["length_factor"] < 1.0
+        assert cal["recommended_words"] == RECOMMENDED_WORDS
+        assert "note" in cal
+        # Confidence still present
         assert "confidence" in data
         assert data["confidence"]["level"] in ("Low", "Medium", "High")
         assert 0 <= data["confidence"]["numeric_score"] <= 100
-        assert "reasons" in data["confidence"]
-        assert "signals" in data["confidence"]
+        # Subscores unchanged
+        assert data["subscores"]["task_response"] == 4.0
+        assert data["subscores"]["grammar"] == 4.0
+
+    def test_evaluate_long_essay_no_calibration_penalty(self, client):
+        payload = {
+            "subscores": {
+                "task_response": 4.0,
+                "coherence_cohesion": 4.0,
+                "lexical_resource": 4.0,
+                "grammar": 4.0,
+            },
+            "estimated_score": 24.0,
+            "strengths": ["Clear thesis", "Good examples"],
+            "weaknesses": ["Some repetition"],
+            "top_fixes": ["Fix A", "Fix B", "Fix C"],
+            "rewrite_first_paragraph": "Technology has changed how we live. I believe that...",
+        }
+        essay_250 = " ".join(["word"] * 250)
+        with patch("main._call_groq", return_value=json.dumps(payload)):
+            r = client.post(
+                "/api/evaluate",
+                json={"prompt": "Do you agree?", "essay": essay_250},
+            )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["estimated_score"] == 24.0
+        assert data["calibration"]["length_factor"] == 1.0
+        assert data["calibration"]["raw_score"] == data["calibration"]["calibrated_score"]
