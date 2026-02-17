@@ -4,23 +4,42 @@ Minimal FastAPI backend for TOEFL essay evaluation via Groq (OpenAI-compatible A
 Example detailed response (POST /api/evaluate?detailed=true):
 {
   "model": "llama-3.1-8b-instant",
-  "estimated_score": 24.0,
+  "estimated_score": 22.4,
   "subscores": {
     "task_response": 4.5,
     "coherence_cohesion": 4.0,
     "lexical_resource": 4.0,
     "grammar": 3.5
   },
+  "calibration": {
+    "recommended_words": 220,
+    "word_count": 205,
+    "length_factor": 0.9318,
+    "raw_score": 24.0,
+    "calibrated_score": 22.4,
+    "note": "Shorter than recommended length; score reduced."
+  },
+  "confidence": {
+    "level": "Medium",
+    "numeric_score": 60,
+    "reasons": [
+      "Essay is below optimal length; reliability is reduced.",
+      "Length-based calibration reduced the score; reliability is lower."
+    ],
+    "signals": {
+      "word_count": 205,
+      "subscore_variance": 1.0,
+      "weakness_count": 1,
+      "has_counterargument_weakness": true,
+      "raw_score": 60.0,
+      "final_score": 24.0
+    }
+  },
   "strengths": [
     {
       "label": "Clear position",
       "explanation": "The thesis is stated in the first paragraph.",
       "evidence": "I believe that technology has made our lives easier."
-    },
-    {
-      "label": "Relevant examples",
-      "explanation": "Concrete support is given for the main idea.",
-      "evidence": null
     }
   ],
   "weaknesses": [
@@ -33,21 +52,8 @@ Example detailed response (POST /api/evaluate?detailed=true):
   ],
   "top_fixes": ["Vary transition words", "Add one counter-argument", "Shorten run-on in paragraph 2"],
   "rewrite_first_paragraph": "Technology has changed how we work and communicate. I believe...",
-  "word_count": 287,
-  "latency_ms": 1520,
-  "confidence": {
-    "level": "High",
-    "numeric_score": 85,
-    "reasons": ["Essay length is above optimal range."],
-    "signals": {
-      "word_count": 287,
-      "subscore_variance": 1.0,
-      "weakness_count": 1,
-      "has_counterargument_weakness": true,
-      "raw_score": 85.0,
-      "final_score": 24.0
-    }
-  }
+  "word_count": 205,
+  "latency_ms": 1520
 }
 """
 import json
@@ -75,6 +81,8 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 MIN_WORDS = 120
+RECOMMENDED_WORDS = 220
+FULL_CONFIDENCE_WORDS = 250
 
 if not GROQ_API_KEY:
     raise RuntimeError("GROQ_API_KEY is required. Set it in .env or environment.")
@@ -118,11 +126,21 @@ class Confidence(BaseModel):
     signals: ConfidenceSignals
 
 
+class Calibration(BaseModel):
+    recommended_words: int
+    word_count: int
+    length_factor: float = Field(..., ge=0, le=1)
+    raw_score: float = Field(..., ge=0, le=30)
+    calibrated_score: float = Field(..., ge=0, le=30)
+    note: str
+
+
 # --- Legacy (flat lists) ---
 class EvaluateResponse(BaseModel):
     model: str
     estimated_score: float = Field(..., ge=0, le=30)
     subscores: Subscores
+    calibration: Calibration
     confidence: Confidence
     strengths: list[str]
     weaknesses: list[str]
@@ -150,6 +168,7 @@ class EvaluateResponseDetailed(BaseModel):
     model: str
     estimated_score: float = Field(..., ge=0, le=30)
     subscores: Subscores
+    calibration: Calibration
     confidence: Confidence
     strengths: list[StrengthItem]
     weaknesses: list[WeaknessItem]
@@ -176,16 +195,46 @@ def word_count(text: str) -> int:
     return len(text.split())
 
 
+# --- Length-based score calibration (server-side only) ---
+def _compute_calibration(wc: int, raw_score: float) -> Calibration:
+    """
+    Apply smooth length penalty to the final score.
+    length_factor = min(1.0, word_count / RECOMMENDED_WORDS)
+    Subscores are NOT modified.
+    """
+    length_factor = min(1.0, wc / RECOMMENDED_WORDS)
+    calibrated = round(raw_score * length_factor, 1)
+    calibrated = max(0.0, min(30.0, calibrated))
+
+    if length_factor >= 1.0:
+        note = "Essay meets recommended length; no score adjustment."
+    elif wc < 180:
+        note = "Significantly shorter than recommended length; score substantially reduced."
+    else:
+        note = "Shorter than recommended length; score reduced."
+
+    return Calibration(
+        recommended_words=RECOMMENDED_WORDS,
+        word_count=wc,
+        length_factor=round(length_factor, 4),
+        raw_score=raw_score,
+        calibrated_score=calibrated,
+        note=note,
+    )
+
+
 # --- Confidence computation (server-side only) ---
 def _compute_confidence(
     word_count: int,
     subscores: Subscores,
     final_score: float,
     weaknesses: list[dict[str, Any]],
+    calibration_delta: float = 0.0,
 ) -> Confidence:
     """
     Compute confidence score (0-100) and level using multi-factor heuristics.
     LLM must NOT generate confidence; this is strictly server-side.
+    calibration_delta = raw_score - calibrated_score (how much calibration reduced).
     """
     score = 100.0
     reasons: list[str] = []
@@ -238,6 +287,11 @@ def _compute_confidence(
     if has_counterargument_weakness and subscores.task_response >= 4:
         score -= 10
         reasons.append("Missing counterargument should reduce task reliability.")
+    
+    # Calibration-aware penalty
+    if word_count < 220 and calibration_delta >= 2:
+        score -= 10
+        reasons.append("Length-based calibration reduced the score; reliability is lower.")
     
     raw_score = score  # Before clamping
     # Clamp to [0, 100]
@@ -648,22 +702,30 @@ def evaluate(
 
     latency_ms = (time.perf_counter_ns() - start) // 1_000_000
     subscores_obj = Subscores(**shaped["subscores"])
-    final_score = shaped["estimated_score"]
-    
+    raw_score = shaped["estimated_score"]
+
+    # Length-based calibration (subscores untouched)
+    calibration = _compute_calibration(words, raw_score)
+    calibrated_score = calibration.calibrated_score
+    calibration_delta = raw_score - calibrated_score
+
     # Normalize weaknesses for confidence computation
     if detailed:
         weaknesses_for_confidence = shaped["weaknesses"]  # Already list of dicts
     else:
-        # Convert string list to dict list for consistency
         weaknesses_for_confidence = [{"label": w} for w in shaped["weaknesses"]]
-    
-    confidence = _compute_confidence(words, subscores_obj, final_score, weaknesses_for_confidence)
+
+    confidence = _compute_confidence(
+        words, subscores_obj, raw_score, weaknesses_for_confidence,
+        calibration_delta=calibration_delta,
+    )
 
     if detailed:
         out = EvaluateResponseDetailed(
             model=GROQ_MODEL,
-            estimated_score=final_score,
+            estimated_score=calibrated_score,
             subscores=subscores_obj,
+            calibration=calibration,
             confidence=confidence,
             strengths=[StrengthItem(**s) for s in shaped["strengths"]],
             weaknesses=[WeaknessItem(**w) for w in shaped["weaknesses"]],
@@ -675,8 +737,9 @@ def evaluate(
         return out
     return EvaluateResponse(
         model=GROQ_MODEL,
-        estimated_score=final_score,
+        estimated_score=calibrated_score,
         subscores=subscores_obj,
+        calibration=calibration,
         confidence=confidence,
         strengths=shaped["strengths"],
         weaknesses=shaped["weaknesses"],

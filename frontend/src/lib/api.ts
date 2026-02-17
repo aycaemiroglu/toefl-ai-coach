@@ -33,6 +33,15 @@ export interface Confidence {
   signals: ConfidenceSignals
 }
 
+export interface Calibration {
+  recommended_words: number
+  word_count: number
+  length_factor: number
+  raw_score: number
+  calibrated_score: number
+  note: string
+}
+
 /** Detailed strength/weakness item (when using ?detailed=true). Weaknesses may include evidence_reason when evidence is null. */
 export interface StrengthWeaknessItem {
   label: string
@@ -45,6 +54,7 @@ export interface EvaluateResponse {
   model: string
   estimated_score: number
   subscores: Subscores
+  calibration: Calibration
   confidence: Confidence
   /** Legacy: string[]. With ?detailed=true: StrengthWeaknessItem[] */
   strengths: string[] | StrengthWeaknessItem[]

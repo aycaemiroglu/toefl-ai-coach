@@ -124,6 +124,24 @@ const styles: Record<string, React.CSSProperties> = {
   },
   confidenceReasonsTitle: { fontSize: '0.8rem', fontWeight: 600, marginBottom: 4, cursor: 'pointer' },
   confidenceReasonsList: { margin: 0, paddingLeft: 20, listStyle: 'disc' },
+  calibrationBadge: {
+    display: 'inline-block',
+    padding: '2px 6px',
+    borderRadius: 4,
+    fontSize: '0.7rem',
+    fontWeight: 600,
+    background: '#e0e7ff',
+    color: '#3730a3',
+    marginLeft: 6,
+    cursor: 'help',
+    position: 'relative' as const,
+  },
+  calibrationNote: {
+    marginTop: 4,
+    fontSize: '0.8rem',
+    color: '#64748b',
+    fontStyle: 'italic',
+  },
 }
 
 type Status = 'idle' | 'loading' | 'success' | 'error'
@@ -242,10 +260,18 @@ export default function App() {
 
           <div style={styles.scoreBox}>
             <div style={styles.scoreLabel}>Overall score</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <div style={styles.scoreValue}>
                 {result.estimated_score.toFixed(1)} / 30
               </div>
+              {result.calibration && result.calibration.length_factor < 1 && (
+                <span
+                  style={styles.calibrationBadge}
+                  title={`Raw: ${result.calibration.raw_score.toFixed(1)} · Factor: ${result.calibration.length_factor.toFixed(2)} · Final: ${result.calibration.calibrated_score.toFixed(1)}`}
+                >
+                  Calibrated
+                </span>
+              )}
               {result.confidence && (
                 <span
                   style={{
@@ -261,6 +287,11 @@ export default function App() {
                 </span>
               )}
             </div>
+            {result.calibration && result.calibration.length_factor < 1 && (
+              <div style={styles.calibrationNote}>
+                {result.calibration.note} (Raw: {result.calibration.raw_score.toFixed(1)}, ×{result.calibration.length_factor.toFixed(2)})
+              </div>
+            )}
             {result.confidence && (
               <>
                 <div style={styles.confidenceNumeric}>
