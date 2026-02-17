@@ -25,8 +25,9 @@ GROQ_API_KEY=gsk_your_key_here
 
 | Goal | Command | Notes |
 |------|--------|------|
+| **Backend (FastAPI)** | `uvicorn backend.main:app --reload --port 8000` | Run in venv; needs GROQ_API_KEY in `.env` |
+| **React frontend** | `cd frontend && npm install && npm run dev` | Needs backend on port 8000; opens http://localhost:3000 |
 | **Synthetic essay generation** (30 essays) | `python scripts/generate_essays.py` | Uses Groq API; `--dry-run` for mock |
-| **React frontend** | `cd frontend && npm install && npm run dev` | Needs backend on port 8000 for `/writing/feedback` (or use Vite proxy) |
 
 ### 3. Synthetic essays (scripts)
 
@@ -41,7 +42,19 @@ python scripts/generate_essays.py
 
 Output: `data/essays/` (JSON + TXT per essay).
 
-### 4. React frontend
+### 4. Backend (FastAPI)
+
+```bash
+source .venv/bin/activate
+uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Runs on http://localhost:8000. Requires `GROQ_API_KEY` in `.env` (or `backend/.env`).
+
+- **Health check:** http://localhost:8000/health
+- **API docs:** http://localhost:8000/docs (Swagger UI)
+
+### 5. React frontend
 
 ```bash
 cd frontend
@@ -49,7 +62,7 @@ npm install
 npm run dev
 ```
 
-Opens http://localhost:3000. Requests to `/writing/feedback` are proxied to `http://localhost:8000` by default (see `frontend/vite.config.js`). Start your FastAPI (or other) backend on port 8000 so the button returns real feedback.
+Opens http://localhost:3000. Requests to `/api/evaluate` are proxied to `http://localhost:8000` (see `frontend/vite.config.ts`). **Start the backend first** (step 4) so the "Analyze Essay" button returns real feedback.
 
 ---
 
@@ -57,6 +70,7 @@ Opens http://localhost:3000. Requests to `/writing/feedback` are proxied to `htt
 
 ```
 toefl-ai-coach/
+├── backend/        # FastAPI app (main.py, requirements.txt)
 ├── data/           # Essay templates, generated data (data/essays/ ignored)
 ├── docs/           # Design and integration notes
 ├── frontend/       # React app (Vite) for writing feedback UI
@@ -66,6 +80,19 @@ toefl-ai-coach/
 ├── requirements.txt
 └── README.md
 ```
+
+---
+
+## Confidence sanity checks
+
+The backend computes confidence server-side (LLM does not generate it). Expected behavior:
+
+- **Short essay (~160 words)** → Low or Medium at most
+- **Long essay (~280 words)** → Medium/High (depending on variance)
+- **Subscores differ by 3+ points** → Not High
+- **Score ≥ 26 with word_count < 200** → Must not be High
+
+To debug confidence computation, set `DEBUG_CONFIDENCE=true` in `.env` and check backend logs.
 
 ---
 

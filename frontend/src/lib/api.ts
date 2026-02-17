@@ -17,9 +17,20 @@ export interface Subscores {
   grammar: number
 }
 
+export interface ConfidenceSignals {
+  word_count: number
+  subscore_variance: number
+  weakness_count: number
+  has_counterargument_weakness: boolean
+  raw_score: number
+  final_score: number
+}
+
 export interface Confidence {
   level: 'Low' | 'Medium' | 'High'
-  reason: string
+  numeric_score: number
+  reasons: string[]
+  signals: ConfidenceSignals
 }
 
 /** Detailed strength/weakness item (when using ?detailed=true). Weaknesses may include evidence_reason when evidence is null. */
@@ -34,7 +45,7 @@ export interface EvaluateResponse {
   model: string
   estimated_score: number
   subscores: Subscores
-  confidence?: Confidence
+  confidence: Confidence
   /** Legacy: string[]. With ?detailed=true: StrengthWeaknessItem[] */
   strengths: string[] | StrengthWeaknessItem[]
   weaknesses: string[] | StrengthWeaknessItem[]

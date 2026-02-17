@@ -2,7 +2,7 @@ import { useState, FormEvent } from 'react'
 import { TOEFL_PROMPTS } from './prompts'
 import { evaluateEssay, EvaluateError, type EvaluateResponse, type StrengthWeaknessItem } from './lib/api'
 
-const MIN_WORDS = 150
+const MIN_WORDS = 120
 
 function wordCount(text: string): number {
   return text.trim() ? text.trim().split(/\s+/).length : 0
@@ -103,6 +103,27 @@ const styles: Record<string, React.CSSProperties> = {
     lineHeight: 1.6,
     whiteSpace: 'pre-wrap',
   },
+  confidenceBadge: {
+    display: 'inline-block',
+    padding: '2px 8px',
+    borderRadius: 4,
+    fontSize: '0.75rem',
+    fontWeight: 600,
+    marginLeft: 8,
+  },
+  confidenceBadgeHigh: { background: '#d1fae5', color: '#065f46' },
+  confidenceBadgeMedium: { background: '#fef3c7', color: '#92400e' },
+  confidenceBadgeLow: { background: '#fee2e2', color: '#991b1b' },
+  confidenceNumeric: { fontSize: '0.75rem', color: '#64748b', marginTop: 4 },
+  confidenceReasons: {
+    marginTop: 8,
+    padding: 8,
+    background: '#f8fafc',
+    borderRadius: 4,
+    fontSize: '0.85rem',
+  },
+  confidenceReasonsTitle: { fontSize: '0.8rem', fontWeight: 600, marginBottom: 4, cursor: 'pointer' },
+  confidenceReasonsList: { margin: 0, paddingLeft: 20, listStyle: 'disc' },
 }
 
 type Status = 'idle' | 'loading' | 'success' | 'error'
@@ -120,6 +141,7 @@ export default function App() {
   const [status, setStatus] = useState<Status>('idle')
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<EvaluateResponse | null>(null)
+  const [showConfidenceReasons, setShowConfidenceReasons] = useState(false)
 
   const selectedPrompt = TOEFL_PROMPTS.find((p) => p.id === promptId)?.text ?? ''
   const words = wordCount(essay)
@@ -216,14 +238,55 @@ export default function App() {
           <h2 style={styles.resultTitle}>Feedback</h2>
           <p style={styles.meta}>
             Model: {result.model} · {result.latency_ms} ms · {result.word_count} words
-            {result.confidence && ` · Confidence: ${result.confidence.level}`}
           </p>
 
           <div style={styles.scoreBox}>
             <div style={styles.scoreLabel}>Overall score</div>
-            <div style={styles.scoreValue}>
-              {result.estimated_score.toFixed(1)} / 30
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={styles.scoreValue}>
+                {result.estimated_score.toFixed(1)} / 30
+              </div>
+              {result.confidence && (
+                <span
+                  style={{
+                    ...styles.confidenceBadge,
+                    ...(result.confidence.level === 'High'
+                      ? styles.confidenceBadgeHigh
+                      : result.confidence.level === 'Medium'
+                        ? styles.confidenceBadgeMedium
+                        : styles.confidenceBadgeLow),
+                  }}
+                >
+                  {result.confidence.level}
+                </span>
+              )}
             </div>
+            {result.confidence && (
+              <>
+                <div style={styles.confidenceNumeric}>
+                  Confidence: {result.confidence.numeric_score}/100
+                </div>
+                {result.confidence.reasons && result.confidence.reasons.length > 0 && (
+                  <div style={styles.confidenceReasons}>
+                    <div
+                      style={styles.confidenceReasonsTitle}
+                      onClick={() => setShowConfidenceReasons(!showConfidenceReasons)}
+                    >
+                      {showConfidenceReasons ? '▼' : '▶'} Why {result.confidence.level}?
+                    </div>
+                    {showConfidenceReasons && (
+                      <ul style={styles.confidenceReasonsList}>
+                        {result.confidence.reasons.map((r, i) => (
+                          <li key={i} style={{ marginBottom: 4 }}>
+                            {r}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
           </div>
 
           <div style={styles.rubricGrid}>

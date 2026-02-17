@@ -34,7 +34,20 @@ Example detailed response (POST /api/evaluate?detailed=true):
   "top_fixes": ["Vary transition words", "Add one counter-argument", "Shorten run-on in paragraph 2"],
   "rewrite_first_paragraph": "Technology has changed how we work and communicate. I believe...",
   "word_count": 287,
-  "latency_ms": 1520
+  "latency_ms": 1520,
+  "confidence": {
+    "level": "High",
+    "numeric_score": 85,
+    "reasons": ["Essay length is above optimal range."],
+    "signals": {
+      "word_count": 287,
+      "subscore_variance": 1.0,
+      "weakness_count": 1,
+      "has_counterargument_weakness": true,
+      "raw_score": 85.0,
+      "final_score": 24.0
+    }
+  }
 }
 """
 import json
@@ -42,7 +55,7 @@ import logging
 import os
 import re
 import time
-from typing import Any
+from typing import Any, Literal
 
 from pathlib import Path
 
@@ -61,7 +74,7 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 # --- Config ------------------------------------------------------------------
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
-MIN_WORDS = 150
+MIN_WORDS = 120
 
 if not GROQ_API_KEY:
     raise RuntimeError("GROQ_API_KEY is required. Set it in .env or environment.")
@@ -86,11 +99,31 @@ class Subscores(BaseModel):
     grammar: float = Field(..., ge=0, le=5)
 
 
+ConfidenceLevel = Literal["Low", "Medium", "High"]
+
+
+class ConfidenceSignals(BaseModel):
+    word_count: int
+    subscore_variance: float
+    weakness_count: int
+    has_counterargument_weakness: bool
+    raw_score: float
+    final_score: float
+
+
+class Confidence(BaseModel):
+    level: ConfidenceLevel
+    numeric_score: int = Field(..., ge=0, le=100)
+    reasons: list[str]
+    signals: ConfidenceSignals
+
+
 # --- Legacy (flat lists) ---
 class EvaluateResponse(BaseModel):
     model: str
     estimated_score: float = Field(..., ge=0, le=30)
     subscores: Subscores
+    confidence: Confidence
     strengths: list[str]
     weaknesses: list[str]
     top_fixes: list[str] = Field(..., min_length=3, max_length=3)
@@ -117,6 +150,7 @@ class EvaluateResponseDetailed(BaseModel):
     model: str
     estimated_score: float = Field(..., ge=0, le=30)
     subscores: Subscores
+    confidence: Confidence
     strengths: list[StrengthItem]
     weaknesses: list[WeaknessItem]
     top_fixes: list[str] = Field(..., min_length=3, max_length=3)
@@ -140,6 +174,112 @@ app.add_middleware(
 
 def word_count(text: str) -> int:
     return len(text.split())
+
+
+# --- Confidence computation (server-side only) ---
+def _compute_confidence(
+    word_count: int,
+    subscores: Subscores,
+    final_score: float,
+    weaknesses: list[dict[str, Any]],
+) -> Confidence:
+    """
+    Compute confidence score (0-100) and level using multi-factor heuristics.
+    LLM must NOT generate confidence; this is strictly server-side.
+    """
+    score = 100.0
+    reasons: list[str] = []
+    
+    # Signals for debugging
+    subscore_values = [
+        subscores.task_response,
+        subscores.coherence_cohesion,
+        subscores.lexical_resource,
+        subscores.grammar,
+    ]
+    subscore_variance = max(subscore_values) - min(subscore_values)
+    weakness_count = len(weaknesses)
+    has_counterargument_weakness = any(
+        "counterargument" in (w.get("label") or "").lower() or "counter-argument" in (w.get("label") or "").lower()
+        for w in weaknesses
+    )
+    
+    # Word count penalty
+    if word_count < 180:
+        score -= 35
+        reasons.append("Essay is shorter than recommended length; scoring is less stable.")
+    elif word_count < 220:
+        score -= 20
+        reasons.append("Essay is below optimal length; reliability is reduced.")
+    elif word_count < 250:
+        score -= 10
+        reasons.append("Essay length is slightly below ideal range.")
+    
+    # Subscore variance penalty
+    if subscore_variance >= 3:
+        score -= 20
+        reasons.append("Subscores vary widely, indicating uncertainty.")
+    elif subscore_variance == 2:
+        score -= 10
+        reasons.append("Subscores show moderate variance.")
+    
+    # High-score short-essay penalty
+    if word_count < 220 and final_score >= 25:
+        score -= 20
+        reasons.append("High overall score with short essay suggests possible model generosity.")
+    if word_count < 180 and final_score >= 23:
+        score -= 15
+        reasons.append("High score for very short essay may be optimistic.")
+    
+    # Weakness-score mismatch penalty
+    if weakness_count >= 3 and final_score >= 25:
+        score -= 15
+        reasons.append("Multiple weaknesses detected; overall score may be optimistic.")
+    if has_counterargument_weakness and subscores.task_response >= 4:
+        score -= 10
+        reasons.append("Missing counterargument should reduce task reliability.")
+    
+    raw_score = score  # Before clamping
+    # Clamp to [0, 100]
+    score = max(0, min(100, int(round(score))))
+    
+    # Map to level
+    if score >= 80:
+        level: ConfidenceLevel = "High"
+    elif score >= 50:
+        level = "Medium"
+    else:
+        level = "Low"
+    
+    # If no reasons (shouldn't happen), add a default
+    if not reasons:
+        reasons.append("Confidence computed from essay characteristics.")
+    
+    signals = ConfidenceSignals(
+        word_count=word_count,
+        subscore_variance=subscore_variance,
+        weakness_count=weakness_count,
+        has_counterargument_weakness=has_counterargument_weakness,
+        raw_score=raw_score,
+        final_score=final_score,
+    )
+    
+    # Debug logging (if DEBUG env var set)
+    if os.getenv("DEBUG_CONFIDENCE", "").lower() in ("1", "true", "yes"):
+        logger.info(
+            "Confidence computed: level=%s, score=%d, reasons=%s, signals=%s",
+            level,
+            score,
+            reasons,
+            signals.model_dump(),
+        )
+    
+    return Confidence(
+        level=level,
+        numeric_score=score,
+        reasons=reasons,
+        signals=signals,
+    )
 
 
 # --- Quote normalization (smart quotes → ASCII) for substring checks ---
@@ -223,6 +363,8 @@ Required keys (exact names):
 - "top_fixes": array of exactly 3 strings (most important fixes)
 - "rewrite_first_paragraph": string (revised first paragraph of the essay)
 
+Do not output confidence; it will be computed server-side.
+
 Output only the raw JSON object, nothing else."""
 
     return """You are a TOEFL Independent Writing rater. Output ONLY one valid JSON object with no other text, no markdown, no code fence.
@@ -235,7 +377,11 @@ Required keys (exact names):
 - "top_fixes": array of exactly 3 strings (most important fixes)
 - "rewrite_first_paragraph": string (revised first paragraph of the essay)
 
-Important: weakness "evidence" must be one full sentence, verbatim from the essay, max 25 words. Choose the strongest and most obvious sentence demonstrating the issue. For repetition, word choice, or grammar/structure weaknesses, always provide the exact sentence. Only use evidence=null when the issue cannot be shown by one sentence. Output only the raw JSON object, nothing else."""
+Important: weakness "evidence" must be one full sentence, verbatim from the essay, max 25 words. Choose the strongest and most obvious sentence demonstrating the issue. For repetition, word choice, or grammar/structure weaknesses, always provide the exact sentence. Only use evidence=null when the issue cannot be shown by one sentence.
+
+Do not output confidence; it will be computed server-side.
+
+Output only the raw JSON object, nothing else."""
 
 
 def _build_user_prompt(prompt: str, essay: str) -> str:
@@ -502,12 +648,23 @@ def evaluate(
 
     latency_ms = (time.perf_counter_ns() - start) // 1_000_000
     subscores_obj = Subscores(**shaped["subscores"])
+    final_score = shaped["estimated_score"]
+    
+    # Normalize weaknesses for confidence computation
+    if detailed:
+        weaknesses_for_confidence = shaped["weaknesses"]  # Already list of dicts
+    else:
+        # Convert string list to dict list for consistency
+        weaknesses_for_confidence = [{"label": w} for w in shaped["weaknesses"]]
+    
+    confidence = _compute_confidence(words, subscores_obj, final_score, weaknesses_for_confidence)
 
     if detailed:
         out = EvaluateResponseDetailed(
             model=GROQ_MODEL,
-            estimated_score=shaped["estimated_score"],
+            estimated_score=final_score,
             subscores=subscores_obj,
+            confidence=confidence,
             strengths=[StrengthItem(**s) for s in shaped["strengths"]],
             weaknesses=[WeaknessItem(**w) for w in shaped["weaknesses"]],
             top_fixes=shaped["top_fixes"],
@@ -518,8 +675,9 @@ def evaluate(
         return out
     return EvaluateResponse(
         model=GROQ_MODEL,
-        estimated_score=shaped["estimated_score"],
+        estimated_score=final_score,
         subscores=subscores_obj,
+        confidence=confidence,
         strengths=shaped["strengths"],
         weaknesses=shaped["weaknesses"],
         top_fixes=shaped["top_fixes"],
