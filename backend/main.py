@@ -1,57 +1,25 @@
 """
 Minimal FastAPI backend for TOEFL essay evaluation via Groq (OpenAI-compatible API).
 
-Example detailed response (POST /api/evaluate?detailed=true):
+Unified response contract (POST /api/evaluate):
 {
-  "model": "llama-3.1-8b-instant",
+  "request_id": "a1b2c3d4-...",
+  "model_name": "llama-3.1-8b-instant",
+  "timestamps": { "received_at": "2026-02-08T...", "completed_at": "2026-02-08T..." },
+  "text_stats": { "word_count": 205, "sentence_count": 12 },
+  "rubric": { "task_response": 4.5, "coherence": 4.0, "lexical": 4.0, "grammar": 3.5 },
+  "scoring": { "raw_score_30": 24.0, "length_factor": 0.9318, "calibrated_score_30": 22.4 },
+  "confidence": { "level": "Medium", "numeric_score_0_100": 60, "reasons": [...], "signals": {...} },
+  "length_evaluation": { "tier": "short", "message": "Below recommended length; score calibrated." },
+  "evidence": {
+    "strengths": [{ "label": "...", "explanation": "...", "evidence": "...|null" }],
+    "weaknesses": [{ "label": "...", "explanation": "...", "evidence": "...|null", "evidence_reason": "...|null" }]
+  },
+  "top_fixes": [...],
+  "rewrite_first_paragraph": "...",
+  // Backward-compat aliases:
   "estimated_score": 22.4,
-  "subscores": {
-    "task_response": 4.5,
-    "coherence_cohesion": 4.0,
-    "lexical_resource": 4.0,
-    "grammar": 3.5
-  },
-  "calibration": {
-    "recommended_words": 220,
-    "word_count": 205,
-    "length_factor": 0.9318,
-    "raw_score": 24.0,
-    "calibrated_score": 22.4,
-    "note": "Shorter than recommended length; score reduced."
-  },
-  "confidence": {
-    "level": "Medium",
-    "numeric_score": 60,
-    "reasons": [
-      "Essay is below optimal length; reliability is reduced.",
-      "Length-based calibration reduced the score; reliability is lower."
-    ],
-    "signals": {
-      "word_count": 205,
-      "subscore_variance": 1.0,
-      "weakness_count": 1,
-      "has_counterargument_weakness": true,
-      "raw_score": 60.0,
-      "final_score": 24.0
-    }
-  },
-  "strengths": [
-    {
-      "label": "Clear position",
-      "explanation": "The thesis is stated in the first paragraph.",
-      "evidence": "I believe that technology has made our lives easier."
-    }
-  ],
-  "weaknesses": [
-    {
-      "label": "Overuse of simple vocabulary",
-      "explanation": "Words like 'very' and 'important' are repeated.",
-      "evidence": "Technology is very important and very useful in our daily lives.",
-      "evidence_reason": null
-    }
-  ],
-  "top_fixes": ["Vary transition words", "Add one counter-argument", "Shorten run-on in paragraph 2"],
-  "rewrite_first_paragraph": "Technology has changed how we work and communicate. I believe...",
+  "subscores": { "task_response": 4.5, "coherence_cohesion": 4.0, "lexical_resource": 4.0, "grammar": 3.5 },
   "word_count": 205,
   "latency_ms": 1520
 }
@@ -61,6 +29,8 @@ import logging
 import os
 import re
 import time
+import uuid
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 from pathlib import Path
@@ -68,7 +38,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
 from pydantic import BaseModel, Field
@@ -98,13 +68,32 @@ client = OpenAI(
 class EvaluateRequest(BaseModel):
     prompt: str = Field(..., min_length=1)
     essay: str = Field(..., min_length=1)
+    prompt_id: str | None = None
 
 
-class Subscores(BaseModel):
+# -- Atomic sub-models (new contract) --
+
+class Timestamps(BaseModel):
+    received_at: str
+    completed_at: str
+
+
+class TextStats(BaseModel):
+    word_count: int
+    sentence_count: int
+
+
+class Rubric(BaseModel):
     task_response: float = Field(..., ge=0, le=5)
-    coherence_cohesion: float = Field(..., ge=0, le=5)
-    lexical_resource: float = Field(..., ge=0, le=5)
+    coherence: float = Field(..., ge=0, le=5)
+    lexical: float = Field(..., ge=0, le=5)
     grammar: float = Field(..., ge=0, le=5)
+
+
+class Scoring(BaseModel):
+    raw_score_30: float = Field(..., ge=0, le=30)
+    length_factor: float = Field(..., ge=0, le=1)
+    calibrated_score_30: float = Field(..., ge=0, le=30)
 
 
 ConfidenceLevel = Literal["Low", "Medium", "High"]
@@ -121,18 +110,9 @@ class ConfidenceSignals(BaseModel):
 
 class Confidence(BaseModel):
     level: ConfidenceLevel
-    numeric_score: int = Field(..., ge=0, le=100)
+    numeric_score_0_100: int = Field(..., ge=0, le=100)
     reasons: list[str]
     signals: ConfidenceSignals
-
-
-class Calibration(BaseModel):
-    recommended_words: int
-    word_count: int
-    length_factor: float = Field(..., ge=0, le=1)
-    raw_score: float = Field(..., ge=0, le=30)
-    calibrated_score: float = Field(..., ge=0, le=30)
-    note: str
 
 
 LengthTier = Literal["short", "recommended", "ideal"]
@@ -143,23 +123,6 @@ class LengthEvaluation(BaseModel):
     message: str
 
 
-# --- Legacy (flat lists) ---
-class EvaluateResponse(BaseModel):
-    model: str
-    estimated_score: float = Field(..., ge=0, le=30)
-    subscores: Subscores
-    calibration: Calibration
-    length_evaluation: LengthEvaluation
-    confidence: Confidence
-    strengths: list[str]
-    weaknesses: list[str]
-    top_fixes: list[str] = Field(..., min_length=3, max_length=3)
-    rewrite_first_paragraph: str
-    word_count: int
-    latency_ms: int
-
-
-# --- Detailed (label + explanation + evidence) ---
 class StrengthItem(BaseModel):
     label: str
     explanation: str
@@ -170,20 +133,39 @@ class WeaknessItem(BaseModel):
     label: str
     explanation: str
     evidence: str | None = None
-    evidence_reason: str | None = None  # when evidence is null, e.g. "conceptual issue, not tied to a single sentence"
+    evidence_reason: str | None = None
 
 
-class EvaluateResponseDetailed(BaseModel):
-    model: str
-    estimated_score: float = Field(..., ge=0, le=30)
-    subscores: Subscores
-    calibration: Calibration
-    length_evaluation: LengthEvaluation
-    confidence: Confidence
+class Evidence(BaseModel):
     strengths: list[StrengthItem]
     weaknesses: list[WeaknessItem]
+
+
+# -- Backward-compat alias for subscores (old key names) --
+class Subscores(BaseModel):
+    task_response: float = Field(..., ge=0, le=5)
+    coherence_cohesion: float = Field(..., ge=0, le=5)
+    lexical_resource: float = Field(..., ge=0, le=5)
+    grammar: float = Field(..., ge=0, le=5)
+
+
+# -- Unified response --
+class EvaluateResponse(BaseModel):
+    request_id: str
+    prompt_id: str | None = None
+    model_name: str
+    timestamps: Timestamps
+    text_stats: TextStats
+    rubric: Rubric
+    scoring: Scoring
+    confidence: Confidence
+    length_evaluation: LengthEvaluation
+    evidence: Evidence
     top_fixes: list[str] = Field(..., min_length=3, max_length=3)
     rewrite_first_paragraph: str
+    # Backward-compat aliases (frontend may still use these)
+    estimated_score: float = Field(..., ge=0, le=30)
+    subscores: Subscores
     word_count: int
     latency_ms: int
 
@@ -205,6 +187,12 @@ def word_count(text: str) -> int:
     return len(text.split())
 
 
+def sentence_count(text: str) -> int:
+    if not text.strip():
+        return 0
+    return len(re.split(r"(?<=[.!?])\s+", text.strip()))
+
+
 # --- Length evaluation (deterministic, server-side only) ---
 def _compute_length_evaluation(wc: int) -> LengthEvaluation:
     if wc < RECOMMENDED_WORDS:
@@ -215,7 +203,15 @@ def _compute_length_evaluation(wc: int) -> LengthEvaluation:
 
 
 # --- Length-based score calibration (server-side only) ---
-def _compute_calibration(wc: int, raw_score: float) -> Calibration:
+class _CalibrationResult:
+    """Internal helper — not exposed in API; data flows into Scoring."""
+    __slots__ = ("length_factor", "calibrated_score")
+    def __init__(self, length_factor: float, calibrated_score: float):
+        self.length_factor = length_factor
+        self.calibrated_score = calibrated_score
+
+
+def _compute_calibration(wc: int, raw_score: float) -> _CalibrationResult:
     """
     Apply smooth length penalty to the final score.
     length_factor = min(1.0, word_count / RECOMMENDED_WORDS)
@@ -224,21 +220,9 @@ def _compute_calibration(wc: int, raw_score: float) -> Calibration:
     length_factor = min(1.0, wc / RECOMMENDED_WORDS)
     calibrated = round(raw_score * length_factor, 1)
     calibrated = max(0.0, min(30.0, calibrated))
-
-    if length_factor >= 1.0:
-        note = "Essay meets recommended length; no score adjustment."
-    elif wc < 180:
-        note = "Significantly shorter than recommended length; score substantially reduced."
-    else:
-        note = "Shorter than recommended length; score reduced."
-
-    return Calibration(
-        recommended_words=RECOMMENDED_WORDS,
-        word_count=wc,
+    return _CalibrationResult(
         length_factor=round(length_factor, 4),
-        raw_score=raw_score,
         calibrated_score=calibrated,
-        note=note,
     )
 
 
@@ -349,7 +333,7 @@ def _compute_confidence(
     
     return Confidence(
         level=level,
-        numeric_score=score,
+        numeric_score_0_100=score,
         reasons=reasons,
         signals=signals,
     )
@@ -670,15 +654,12 @@ def _call_groq(prompt: str, essay: str, fix_json: bool = False, detailed: bool =
 @app.post(
     "/api/evaluate",
     summary="Evaluate TOEFL essay",
-    response_description="Structured evaluation; use ?detailed=true for strengths/weaknesses with label, explanation, and evidence quote.",
+    response_description="Unified evaluation response with rubric, scoring, confidence, evidence, and backward-compat aliases.",
 )
-def evaluate(
-    request: EvaluateRequest,
-    detailed: bool = Query(
-        False,
-        description="If true, return strengths/weaknesses as objects with label, explanation, and evidence (exact quote from essay or null).",
-    ),
-) -> EvaluateResponse | EvaluateResponseDetailed:
+def evaluate(request: EvaluateRequest) -> EvaluateResponse:
+    received_at = datetime.now(timezone.utc).isoformat()
+    request_id = str(uuid.uuid4())
+
     essay_text = request.essay.strip()
     words = word_count(essay_text)
     if words < MIN_WORDS:
@@ -687,6 +668,7 @@ def evaluate(
             detail=f"Essay must be at least {MIN_WORDS} words. Current word count: {words}.",
         )
 
+    sentences = sentence_count(essay_text)
     start = time.perf_counter_ns()
     content: str | None = None
     parsed: dict[str, Any] | None = None
@@ -695,7 +677,7 @@ def evaluate(
     for attempt, is_retry in enumerate([False, True], start=1):
         try:
             content = _call_groq(
-                request.prompt, essay_text, fix_json=is_retry, detailed=detailed
+                request.prompt, essay_text, fix_json=is_retry, detailed=True
             )
         except Exception as e:
             raise HTTPException(
@@ -705,11 +687,7 @@ def evaluate(
 
         parsed = _parse_llm_json(content)
         if parsed is not None:
-            shaped = (
-                _validate_and_shape_detailed(parsed, essay_text)
-                if detailed
-                else _validate_and_shape(parsed)
-            )
+            shaped = _validate_and_shape_detailed(parsed, essay_text)
         if shaped is not None:
             break
 
@@ -720,53 +698,59 @@ def evaluate(
         )
 
     latency_ms = (time.perf_counter_ns() - start) // 1_000_000
-    subscores_obj = Subscores(**shaped["subscores"])
+    completed_at = datetime.now(timezone.utc).isoformat()
+
+    sub = shaped["subscores"]
     raw_score = shaped["estimated_score"]
 
     # Length-based calibration (subscores untouched)
     calibration = _compute_calibration(words, raw_score)
     calibrated_score = calibration.calibrated_score
     calibration_delta = raw_score - calibrated_score
-    length_evaluation = _compute_length_evaluation(words)
+    length_eval = _compute_length_evaluation(words)
 
-    # Normalize weaknesses for confidence computation
-    if detailed:
-        weaknesses_for_confidence = shaped["weaknesses"]  # Already list of dicts
-    else:
-        weaknesses_for_confidence = [{"label": w} for w in shaped["weaknesses"]]
+    # Build Subscores for confidence (uses old key names internally)
+    subscores_obj = Subscores(
+        task_response=sub["task_response"],
+        coherence_cohesion=sub["coherence_cohesion"],
+        lexical_resource=sub["lexical_resource"],
+        grammar=sub["grammar"],
+    )
 
+    weaknesses_for_confidence = shaped["weaknesses"]
     confidence = _compute_confidence(
         words, subscores_obj, raw_score, weaknesses_for_confidence,
         calibration_delta=calibration_delta,
     )
 
-    if detailed:
-        out = EvaluateResponseDetailed(
-            model=GROQ_MODEL,
-            estimated_score=calibrated_score,
-            subscores=subscores_obj,
-            calibration=calibration,
-            length_evaluation=length_evaluation,
-            confidence=confidence,
+    return EvaluateResponse(
+        request_id=request_id,
+        prompt_id=request.prompt_id,
+        model_name=GROQ_MODEL,
+        timestamps=Timestamps(received_at=received_at, completed_at=completed_at),
+        text_stats=TextStats(word_count=words, sentence_count=sentences),
+        rubric=Rubric(
+            task_response=sub["task_response"],
+            coherence=sub["coherence_cohesion"],
+            lexical=sub["lexical_resource"],
+            grammar=sub["grammar"],
+        ),
+        scoring=Scoring(
+            raw_score_30=raw_score,
+            length_factor=calibration.length_factor,
+            calibrated_score_30=calibrated_score,
+        ),
+        confidence=confidence,
+        length_evaluation=length_eval,
+        evidence=Evidence(
             strengths=[StrengthItem(**s) for s in shaped["strengths"]],
             weaknesses=[WeaknessItem(**w) for w in shaped["weaknesses"]],
-            top_fixes=shaped["top_fixes"],
-            rewrite_first_paragraph=shaped["rewrite_first_paragraph"],
-            word_count=words,
-            latency_ms=latency_ms,
-        )
-        return out
-    return EvaluateResponse(
-        model=GROQ_MODEL,
-        estimated_score=calibrated_score,
-        subscores=subscores_obj,
-        calibration=calibration,
-        length_evaluation=length_evaluation,
-        confidence=confidence,
-        strengths=shaped["strengths"],
-        weaknesses=shaped["weaknesses"],
+        ),
         top_fixes=shaped["top_fixes"],
         rewrite_first_paragraph=shaped["rewrite_first_paragraph"],
+        # Backward-compat aliases
+        estimated_score=calibrated_score,
+        subscores=subscores_obj,
         word_count=words,
         latency_ms=latency_ms,
     )

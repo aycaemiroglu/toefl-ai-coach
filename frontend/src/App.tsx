@@ -1,15 +1,11 @@
 import { useState, FormEvent } from 'react'
 import { TOEFL_PROMPTS } from './prompts'
-import { evaluateEssay, EvaluateError, type EvaluateResponse, type StrengthWeaknessItem } from './lib/api'
+import { evaluateEssay, EvaluateError, type EvaluateResponse } from './lib/api'
 
 const MIN_WORDS = 120
 
 function wordCount(text: string): number {
   return text.trim() ? text.trim().split(/\s+/).length : 0
-}
-
-function isDetailedItem(x: string | StrengthWeaknessItem): x is StrengthWeaknessItem {
-  return typeof x === 'object' && x !== null && 'label' in x && 'explanation' in x
 }
 
 const styles: Record<string, React.CSSProperties> = {
@@ -155,10 +151,10 @@ const styles: Record<string, React.CSSProperties> = {
 
 type Status = 'idle' | 'loading' | 'success' | 'error'
 
-const RUBRIC_LABELS: Record<keyof EvaluateResponse['subscores'], string> = {
+const RUBRIC_LABELS: Record<keyof EvaluateResponse['rubric'], string> = {
   task_response: 'Task response',
-  coherence_cohesion: 'Coherence & cohesion',
-  lexical_resource: 'Lexical resource',
+  coherence: 'Coherence & cohesion',
+  lexical: 'Lexical resource',
   grammar: 'Grammar',
 }
 
@@ -264,19 +260,19 @@ export default function App() {
         <section style={styles.result} aria-live="polite">
           <h2 style={styles.resultTitle}>Feedback</h2>
           <p style={styles.meta}>
-            Model: {result.model} · {result.latency_ms} ms · {result.word_count} words
+            Model: {result.model_name} · {result.latency_ms} ms · {result.text_stats.word_count} words · {result.text_stats.sentence_count} sentences
           </p>
 
           <div style={styles.scoreBox}>
             <div style={styles.scoreLabel}>Overall score</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <div style={styles.scoreValue}>
-                {result.estimated_score.toFixed(1)} / 30
+                {result.scoring.calibrated_score_30.toFixed(1)} / 30
               </div>
-              {result.calibration && result.calibration.length_factor < 1 && (
+              {result.scoring.length_factor < 1 && (
                 <span
                   style={styles.calibrationBadge}
-                  title={`Raw: ${result.calibration.raw_score.toFixed(1)} · Factor: ${result.calibration.length_factor.toFixed(2)} · Final: ${result.calibration.calibrated_score.toFixed(1)}`}
+                  title={`Raw: ${result.scoring.raw_score_30.toFixed(1)} · Factor: ${result.scoring.length_factor.toFixed(2)} · Final: ${result.scoring.calibrated_score_30.toFixed(1)}`}
                 >
                   Calibrated
                 </span>
@@ -296,9 +292,9 @@ export default function App() {
                 </span>
               )}
             </div>
-            {result.calibration && result.calibration.length_factor < 1 && (
+            {result.scoring.length_factor < 1 && (
               <div style={styles.calibrationNote}>
-                {result.calibration.note} (Raw: {result.calibration.raw_score.toFixed(1)}, ×{result.calibration.length_factor.toFixed(2)})
+                Shorter than recommended length; score reduced. (Raw: {result.scoring.raw_score_30.toFixed(1)}, x{result.scoring.length_factor.toFixed(2)})
               </div>
             )}
             {result.length_evaluation && (
@@ -309,7 +305,7 @@ export default function App() {
             {result.confidence && (
               <>
                 <div style={styles.confidenceNumeric}>
-                  Confidence: {result.confidence.numeric_score}/100
+                  Confidence: {result.confidence.numeric_score_0_100}/100
                 </div>
                 {result.confidence.reasons && result.confidence.reasons.length > 0 && (
                   <div style={styles.confidenceReasons}>
@@ -335,12 +331,12 @@ export default function App() {
           </div>
 
           <div style={styles.rubricGrid}>
-            {(Object.keys(result.subscores) as Array<keyof EvaluateResponse['subscores']>).map(
+            {(Object.keys(result.rubric) as Array<keyof EvaluateResponse['rubric']>).map(
               (key) => (
                 <div key={key} style={styles.rubricCard}>
                   <div style={styles.rubricLabel}>{RUBRIC_LABELS[key]}</div>
                   <div style={styles.rubricValue}>
-                    {result.subscores[key].toFixed(1)} / 5
+                    {result.rubric[key].toFixed(1)} / 5
                   </div>
                 </div>
               )
@@ -349,19 +345,13 @@ export default function App() {
 
           <h3 style={styles.sectionTitle}>Strengths</h3>
           <ul style={styles.list}>
-            {result.strengths.map((s, i) => (
+            {result.evidence.strengths.map((s, i) => (
               <li key={i} style={styles.listItem}>
-                {isDetailedItem(s) ? (
-                  <>
-                    <strong>{s.label}</strong>: {s.explanation}
-                    {s.evidence != null && s.evidence !== '' && (
-                      <blockquote style={{ margin: '4px 0 0', fontSize: '0.9em', color: '#555' }}>
-                        "{s.evidence}"
-                      </blockquote>
-                    )}
-                  </>
-                ) : (
-                  String(s)
+                <strong>{s.label}</strong>: {s.explanation}
+                {s.evidence != null && s.evidence !== '' && (
+                  <blockquote style={{ margin: '4px 0 0', fontSize: '0.9em', color: '#555' }}>
+                    &ldquo;{s.evidence}&rdquo;
+                  </blockquote>
                 )}
               </li>
             ))}
@@ -369,23 +359,17 @@ export default function App() {
 
           <h3 style={styles.sectionTitle}>Weaknesses</h3>
           <ul style={styles.list}>
-            {result.weaknesses.map((w, i) => (
+            {result.evidence.weaknesses.map((w, i) => (
               <li key={i} style={styles.listItem}>
-                {isDetailedItem(w) ? (
-                  <>
-                    <strong>{w.label}</strong>: {w.explanation}
-                    {w.evidence != null && w.evidence !== '' ? (
-                      <blockquote style={{ margin: '4px 0 0', fontSize: '0.9em', color: '#555' }}>
-                        "{w.evidence}"
-                      </blockquote>
-                    ) : (
-                      <p style={{ margin: '4px 0 0', fontSize: '0.85em', color: '#888' }}>
-                        No direct quote available{w.evidence_reason ? ` — ${w.evidence_reason}` : ''}
-                      </p>
-                    )}
-                  </>
+                <strong>{w.label}</strong>: {w.explanation}
+                {w.evidence != null && w.evidence !== '' ? (
+                  <blockquote style={{ margin: '4px 0 0', fontSize: '0.9em', color: '#555' }}>
+                    &ldquo;{w.evidence}&rdquo;
+                  </blockquote>
                 ) : (
-                  String(w)
+                  <p style={{ margin: '4px 0 0', fontSize: '0.85em', color: '#888' }}>
+                    No direct quote available{w.evidence_reason ? ` — ${w.evidence_reason}` : ''}
+                  </p>
                 )}
               </li>
             ))}

@@ -8,13 +8,32 @@ const API_BASE = import.meta.env.VITE_API_URL ?? ''
 export interface EvaluatePayload {
   prompt: string
   essay: string
+  prompt_id?: string
 }
 
-export interface Subscores {
+// --- New unified contract types ---
+
+export interface Timestamps {
+  received_at: string
+  completed_at: string
+}
+
+export interface TextStats {
+  word_count: number
+  sentence_count: number
+}
+
+export interface Rubric {
   task_response: number
-  coherence_cohesion: number
-  lexical_resource: number
+  coherence: number
+  lexical: number
   grammar: number
+}
+
+export interface Scoring {
+  raw_score_30: number
+  length_factor: number
+  calibrated_score_30: number
 }
 
 export interface ConfidenceSignals {
@@ -28,18 +47,9 @@ export interface ConfidenceSignals {
 
 export interface Confidence {
   level: 'Low' | 'Medium' | 'High'
-  numeric_score: number
+  numeric_score_0_100: number
   reasons: string[]
   signals: ConfidenceSignals
-}
-
-export interface Calibration {
-  recommended_words: number
-  word_count: number
-  length_factor: number
-  raw_score: number
-  calibrated_score: number
-  note: string
 }
 
 export interface LengthEvaluation {
@@ -47,26 +57,48 @@ export interface LengthEvaluation {
   message: string
 }
 
-/** Detailed strength/weakness item (when using ?detailed=true). Weaknesses may include evidence_reason when evidence is null. */
-export interface StrengthWeaknessItem {
+export interface StrengthItem {
+  label: string
+  explanation: string
+  evidence: string | null
+}
+
+export interface WeaknessItem {
   label: string
   explanation: string
   evidence: string | null
   evidence_reason?: string | null
 }
 
+export interface Evidence {
+  strengths: StrengthItem[]
+  weaknesses: WeaknessItem[]
+}
+
+// Backward-compat alias
+export interface Subscores {
+  task_response: number
+  coherence_cohesion: number
+  lexical_resource: number
+  grammar: number
+}
+
 export interface EvaluateResponse {
-  model: string
-  estimated_score: number
-  subscores: Subscores
-  calibration: Calibration
-  length_evaluation: LengthEvaluation
+  request_id: string
+  prompt_id: string | null
+  model_name: string
+  timestamps: Timestamps
+  text_stats: TextStats
+  rubric: Rubric
+  scoring: Scoring
   confidence: Confidence
-  /** Legacy: string[]. With ?detailed=true: StrengthWeaknessItem[] */
-  strengths: string[] | StrengthWeaknessItem[]
-  weaknesses: string[] | StrengthWeaknessItem[]
+  length_evaluation: LengthEvaluation
+  evidence: Evidence
   top_fixes: string[]
   rewrite_first_paragraph: string
+  // Backward-compat aliases
+  estimated_score: number
+  subscores: Subscores
   word_count: number
   latency_ms: number
 }
@@ -84,21 +116,21 @@ export class EvaluateError extends Error {
 
 /**
  * POST /api/evaluate with { prompt, essay }.
- * Uses ?detailed=true to get strengths/weaknesses as { label, explanation, evidence }.
+ * Always returns unified response with evidence (detailed strengths/weaknesses).
  * Throws EvaluateError on non-2xx, network, or JSON parse errors.
  */
 export async function evaluateEssay(payload: EvaluatePayload): Promise<EvaluateResponse> {
   const base = API_BASE ? `${API_BASE.replace(/\/$/, '')}/api/evaluate` : '/api/evaluate'
-  const url = `${base}?detailed=true`
   let res: Response
 
   try {
-    res = await fetch(url, {
+    res = await fetch(base, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         prompt: payload.prompt.trim(),
         essay: payload.essay.trim(),
+        ...(payload.prompt_id ? { prompt_id: payload.prompt_id } : {}),
       }),
     })
   } catch (err) {
