@@ -31,6 +31,8 @@ data/*.xlsx
 data/essays/
 results/*.png
 results/*.json
+results/*.jsonl
+results/*.md
 
 # Frontend (React)
 frontend/node_modules/

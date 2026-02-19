@@ -78,3 +78,46 @@ python -m tests.update_golden
 ```
 
 Then review the diff and commit the updated golden files.
+
+## Offline Evaluation Harness
+
+Run the evaluator on a folder of essays and produce a metrics report — same
+pipeline as the API, no server needed.
+
+### Input Formats
+
+Place files in a folder (e.g. `data/essays/`):
+
+- **`.txt`** — plain essay text (uses a default prompt)
+- **`.json`** — `{"essay": "...", "prompt": "...", "prompt_id": "...", "level": "..."}`  
+  Only `essay` is required; others are optional metadata.
+
+### Running
+
+```bash
+# From project root:
+python -m eval_harness --input data/essays --out results
+
+# With rate-limit throttle (recommended for large batches):
+python -m eval_harness --input data/essays --out results --delay 5
+
+# Deterministic seed + verbose logging:
+python -m eval_harness -i data/essays -o results --seed 42 -v
+```
+
+### Output
+
+| File | Description |
+|------|-------------|
+| `results/results.jsonl` | One JSON object per essay (full API-equivalent response + `_meta`) |
+| `results/summary.md` | Aggregated metrics report |
+
+### Summary Report Contents
+
+- Length tier distribution (short / recommended / ideal)
+- Average raw vs. calibrated score
+- Average confidence score by tier
+- Calibration impact distribution
+- Evidence quality (% weaknesses with substring evidence vs. null)
+- Top 10 most common weakness labels
+- Error log (if any essays failed)

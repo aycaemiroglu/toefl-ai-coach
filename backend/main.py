@@ -651,21 +651,23 @@ def _call_groq(prompt: str, essay: str, fix_json: bool = False, detailed: bool =
     return choice.message.content or ""
 
 
-@app.post(
-    "/api/evaluate",
-    summary="Evaluate TOEFL essay",
-    response_description="Unified evaluation response with rubric, scoring, confidence, evidence, and backward-compat aliases.",
-)
-def evaluate(request: EvaluateRequest) -> EvaluateResponse:
+def evaluate_essay_core(
+    prompt: str,
+    essay: str,
+    prompt_id: str | None = None,
+) -> EvaluateResponse:
+    """
+    Core evaluation pipeline shared by the API endpoint and the offline harness.
+    Raises ValueError for validation/LLM errors (caller maps to HTTP or CLI error).
+    """
     received_at = datetime.now(timezone.utc).isoformat()
     request_id = str(uuid.uuid4())
 
-    essay_text = request.essay.strip()
+    essay_text = essay.strip()
     words = word_count(essay_text)
     if words < MIN_WORDS:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Essay must be at least {MIN_WORDS} words. Current word count: {words}.",
+        raise ValueError(
+            f"Essay must be at least {MIN_WORDS} words. Current word count: {words}."
         )
 
     sentences = sentence_count(essay_text)
@@ -675,16 +677,7 @@ def evaluate(request: EvaluateRequest) -> EvaluateResponse:
     shaped: dict[str, Any] | None = None
 
     for attempt, is_retry in enumerate([False, True], start=1):
-        try:
-            content = _call_groq(
-                request.prompt, essay_text, fix_json=is_retry, detailed=True
-            )
-        except Exception as e:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Evaluation service error: {str(e)}",
-            ) from e
-
+        content = _call_groq(prompt, essay_text, fix_json=is_retry, detailed=True)
         parsed = _parse_llm_json(content)
         if parsed is not None:
             shaped = _validate_and_shape_detailed(parsed, essay_text)
@@ -692,9 +685,8 @@ def evaluate(request: EvaluateRequest) -> EvaluateResponse:
             break
 
     if shaped is None:
-        raise HTTPException(
-            status_code=502,
-            detail="Evaluation service returned invalid or incomplete JSON. Please try again.",
+        raise ValueError(
+            "Evaluation service returned invalid or incomplete JSON."
         )
 
     latency_ms = (time.perf_counter_ns() - start) // 1_000_000
@@ -703,13 +695,11 @@ def evaluate(request: EvaluateRequest) -> EvaluateResponse:
     sub = shaped["subscores"]
     raw_score = shaped["estimated_score"]
 
-    # Length-based calibration (subscores untouched)
     calibration = _compute_calibration(words, raw_score)
     calibrated_score = calibration.calibrated_score
     calibration_delta = raw_score - calibrated_score
     length_eval = _compute_length_evaluation(words)
 
-    # Build Subscores for confidence (uses old key names internally)
     subscores_obj = Subscores(
         task_response=sub["task_response"],
         coherence_cohesion=sub["coherence_cohesion"],
@@ -725,7 +715,7 @@ def evaluate(request: EvaluateRequest) -> EvaluateResponse:
 
     return EvaluateResponse(
         request_id=request_id,
-        prompt_id=request.prompt_id,
+        prompt_id=prompt_id,
         model_name=GROQ_MODEL,
         timestamps=Timestamps(received_at=received_at, completed_at=completed_at),
         text_stats=TextStats(word_count=words, sentence_count=sentences),
@@ -748,12 +738,29 @@ def evaluate(request: EvaluateRequest) -> EvaluateResponse:
         ),
         top_fixes=shaped["top_fixes"],
         rewrite_first_paragraph=shaped["rewrite_first_paragraph"],
-        # Backward-compat aliases
         estimated_score=calibrated_score,
         subscores=subscores_obj,
         word_count=words,
         latency_ms=latency_ms,
     )
+
+
+@app.post(
+    "/api/evaluate",
+    summary="Evaluate TOEFL essay",
+    response_description="Unified evaluation response with rubric, scoring, confidence, evidence, and backward-compat aliases.",
+)
+def evaluate(request: EvaluateRequest) -> EvaluateResponse:
+    try:
+        return evaluate_essay_core(request.prompt, request.essay, request.prompt_id)
+    except ValueError as exc:
+        detail = str(exc)
+        code = 422 if "at least" in detail else 502
+        raise HTTPException(status_code=code, detail=detail) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502, detail=f"Evaluation service error: {exc}"
+        ) from exc
 
 
 @app.get("/health")
