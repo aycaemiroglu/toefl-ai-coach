@@ -1,0 +1,86 @@
+{
+  "prompt_id": "tech_easier_v1",
+  "model_name": "llama-3.1-8b-instant",
+  "text_stats": {
+    "word_count": 222,
+    "sentence_count": 17
+  },
+  "rubric": {
+    "task_response": 4.5,
+    "coherence": 4.0,
+    "lexical": 4.0,
+    "grammar": 4.0
+  },
+  "scoring": {
+    "raw_score_30": 25.0,
+    "length_factor": 1.0,
+    "calibrated_score_30": 25.0
+  },
+  "confidence": {
+    "level": "High",
+    "numeric_score_0_100": 80,
+    "reasons": [
+      "Essay length is slightly below ideal range.",
+      "Missing counterargument should reduce task reliability."
+    ],
+    "signals": {
+      "word_count": 222,
+      "subscore_variance": 0.5,
+      "weakness_count": 2,
+      "has_counterargument_weakness": true,
+      "raw_score": 80.0,
+      "final_score": 25.0
+    }
+  },
+  "length_evaluation": {
+    "tier": "recommended",
+    "message": "Meets recommended length; full score applied."
+  },
+  "evidence": {
+    "strengths": [
+      {
+        "label": "Well-organized structure",
+        "explanation": "The essay follows a clear pattern with introduction, body paragraphs, and conclusion.",
+        "evidence": null
+      },
+      {
+        "label": "Specific examples",
+        "explanation": "The writer provides concrete real-world examples to support arguments.",
+        "evidence": "millions of students continued their education through online platforms like Zoom and Google Classroom"
+      },
+      {
+        "label": "Balanced perspective",
+        "explanation": "The writer acknowledges counterarguments before reaffirming the thesis.",
+        "evidence": "I acknowledge that technology also brings challenges."
+      }
+    ],
+    "weaknesses": [
+      {
+        "label": "Repetitive phrasing",
+        "explanation": "Several sentences begin with similar structures.",
+        "evidence": "Communication is faster, education is more accessible, and healthcare is more effective.",
+        "evidence_reason": null
+      },
+      {
+        "label": "Missing counterargument depth",
+        "explanation": "The drawbacks section is underdeveloped compared to the benefits.",
+        "evidence": null,
+        "evidence_reason": "Conceptual issue not tied to a single sentence."
+      }
+    ]
+  },
+  "top_fixes": [
+    "Vary sentence openings to avoid repetition",
+    "Expand the counterargument section",
+    "Add a more specific concluding example"
+  ],
+  "rewrite_first_paragraph": "The rapid advancement of technology has fundamentally transformed how we live, communicate, and learn. I strongly agree that these changes have made our lives considerably easier, and this trend shows no signs of slowing down.",
+  "estimated_score": 25.0,
+  "subscores": {
+    "task_response": 4.5,
+    "coherence_cohesion": 4.0,
+    "lexical_resource": 4.0,
+    "grammar": 4.0
+  },
+  "word_count": 222
+}

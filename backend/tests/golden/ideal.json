@@ -1,0 +1,85 @@
+{
+  "prompt_id": "tech_easier_v1",
+  "model_name": "llama-3.1-8b-instant",
+  "text_stats": {
+    "word_count": 292,
+    "sentence_count": 19
+  },
+  "rubric": {
+    "task_response": 4.5,
+    "coherence": 4.5,
+    "lexical": 4.5,
+    "grammar": 4.5
+  },
+  "scoring": {
+    "raw_score_30": 27.0,
+    "length_factor": 1.0,
+    "calibrated_score_30": 27.0
+  },
+  "confidence": {
+    "level": "High",
+    "numeric_score_0_100": 100,
+    "reasons": [
+      "Confidence computed from essay characteristics."
+    ],
+    "signals": {
+      "word_count": 292,
+      "subscore_variance": 0.0,
+      "weakness_count": 2,
+      "has_counterargument_weakness": false,
+      "raw_score": 100.0,
+      "final_score": 27.0
+    }
+  },
+  "length_evaluation": {
+    "tier": "ideal",
+    "message": "Ideal length range; maximum confidence."
+  },
+  "evidence": {
+    "strengths": [
+      {
+        "label": "Comprehensive coverage",
+        "explanation": "The essay thoroughly addresses multiple domains affected by technology.",
+        "evidence": null
+      },
+      {
+        "label": "Strong topic sentences",
+        "explanation": "Each paragraph begins with a clear topic sentence that guides the reader.",
+        "evidence": "Furthermore, technology has revolutionized the field of education."
+      },
+      {
+        "label": "Sophisticated vocabulary",
+        "explanation": "The writer uses varied and precise word choices throughout.",
+        "evidence": "facilitated international business collaboration"
+      }
+    ],
+    "weaknesses": [
+      {
+        "label": "Slightly formulaic structure",
+        "explanation": "The essay follows a predictable pattern that could be more creative.",
+        "evidence": null,
+        "evidence_reason": "Conceptual issue not tied to a single sentence."
+      },
+      {
+        "label": "Conclusion could be stronger",
+        "explanation": "The conclusion restates the thesis but does not offer a new insight.",
+        "evidence": "By embracing technology thoughtfully, we can continue to improve our quality of life and build a more connected world.",
+        "evidence_reason": null
+      }
+    ]
+  },
+  "top_fixes": [
+    "Add a forward-looking insight in the conclusion",
+    "Vary the essay structure for originality",
+    "Include one more specific statistic or fact"
+  ],
+  "rewrite_first_paragraph": "In an era defined by rapid technological innovation, few would dispute that our daily lives have been profoundly transformed. I strongly agree that technology has made our lives easier, and the evidence supporting this claim spans communication, education, and healthcare.",
+  "estimated_score": 27.0,
+  "subscores": {
+    "task_response": 4.5,
+    "coherence_cohesion": 4.5,
+    "lexical_resource": 4.5,
+    "grammar": 4.5
+  },
+  "word_count": 292
+}

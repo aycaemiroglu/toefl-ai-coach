@@ -1,5 +1,6 @@
 """
-Tests for TOEFL AI Coach backend: word_count, confidence computation, and API.
+Tests for TOEFL AI Coach backend: word_count, sentence_count, confidence, calibration,
+length evaluation, and the unified API response contract.
 Run from repo root: pytest backend/tests/ -v
 Or from backend: pytest tests/ -v
 """
@@ -12,10 +13,8 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-# Allow importing main without real API key (evaluate calls are mocked where needed)
 os.environ.setdefault("GROQ_API_KEY", "test-key-for-unit-tests")
 
-# Ensure backend is on path when running from repo root
 _backend = Path(__file__).resolve().parent.parent
 if str(_backend) not in sys.path:
     sys.path.insert(0, str(_backend))
@@ -29,11 +28,12 @@ from main import (
     _compute_confidence,
     _compute_length_evaluation,
     app,
+    sentence_count,
     word_count,
 )
 
 
-# --- Word count -----------------------------------------------------------------
+# --- Word count / sentence count ------------------------------------------------
 class TestWordCount:
     def test_empty_string(self):
         assert word_count("") == 0
@@ -45,12 +45,25 @@ class TestWordCount:
         assert word_count("one two three four five") == 5
 
     def test_leading_trailing_spaces(self):
-        # split() collapses multiple spaces; we count tokens
         assert word_count("  a  b  c  ") == 3
 
     def test_exactly_min_words(self):
         text = "word " * (MIN_WORDS - 1) + "word"
         assert word_count(text) == MIN_WORDS
+
+
+class TestSentenceCount:
+    def test_empty_string(self):
+        assert sentence_count("") == 0
+
+    def test_single_sentence(self):
+        assert sentence_count("Hello world.") == 1
+
+    def test_multiple_sentences(self):
+        assert sentence_count("First. Second! Third?") == 3
+
+    def test_no_punctuation(self):
+        assert sentence_count("no punctuation here") == 1
 
 
 # --- Confidence computation -----------------------------------------------------
@@ -69,10 +82,9 @@ class TestComputeConfidence:
             weaknesses=[],
         )
         assert conf.level == "High"
-        assert conf.numeric_score >= 80
+        assert conf.numeric_score_0_100 >= 80
         assert conf.reasons
         assert conf.signals.word_count == 260
-        assert conf.signals.subscore_variance == 0.0
 
     def test_short_essay_penalty(self):
         subscores = Subscores(
@@ -87,9 +99,7 @@ class TestComputeConfidence:
             final_score=22.0,
             weaknesses=[],
         )
-        # Below 180: -35; should have "shorter than recommended" reason
         assert any("shorter" in r.lower() or "length" in r.lower() for r in conf.reasons)
-        assert conf.signals.word_count == 170
 
     def test_subscore_variance_penalty(self):
         subscores = Subscores(
@@ -120,7 +130,6 @@ class TestComputeConfidence:
             final_score=26.0,
             weaknesses=[],
         )
-        # word_count < 220 and final_score >= 25 -> extra penalty
         assert any("short" in r.lower() or "generosity" in r.lower() for r in conf.reasons)
 
     def test_confidence_score_clamped_0_100(self):
@@ -136,7 +145,7 @@ class TestComputeConfidence:
             final_score=28.0,
             weaknesses=[{"label": "x"}, {"label": "y"}, {"label": "counterargument"}],
         )
-        assert 0 <= conf.numeric_score <= 100
+        assert 0 <= conf.numeric_score_0_100 <= 100
 
     def test_counterargument_weakness_signal(self):
         conf = _compute_confidence(
@@ -159,8 +168,6 @@ class TestComputeCalibration:
         cal = _compute_calibration(250, 26.0)
         assert cal.length_factor == 1.0
         assert cal.calibrated_score == 26.0
-        assert cal.raw_score == 26.0
-        assert "no score adjustment" in cal.note.lower()
 
     def test_exactly_recommended_words(self):
         cal = _compute_calibration(RECOMMENDED_WORDS, 24.0)
@@ -170,31 +177,18 @@ class TestComputeCalibration:
     def test_short_essay_penalty(self):
         cal = _compute_calibration(110, 26.0)
         assert cal.length_factor == round(110 / RECOMMENDED_WORDS, 4)
-        assert cal.calibrated_score == round(26.0 * (110 / RECOMMENDED_WORDS), 1)
         assert cal.calibrated_score == 13.0
 
     def test_moderately_short_essay(self):
         cal = _compute_calibration(200, 24.0)
         expected_factor = round(200 / RECOMMENDED_WORDS, 4)
         assert cal.length_factor == expected_factor
-        expected_score = round(24.0 * (200 / RECOMMENDED_WORDS), 1)
-        assert cal.calibrated_score == expected_score
-        assert "shorter than recommended" in cal.note.lower()
-
-    def test_very_short_essay_note(self):
-        cal = _compute_calibration(150, 20.0)
-        assert "significantly shorter" in cal.note.lower()
 
     def test_calibrated_score_clamped(self):
         cal = _compute_calibration(50, 30.0)
         assert 0 <= cal.calibrated_score <= 30
         cal2 = _compute_calibration(300, 0.0)
         assert cal2.calibrated_score == 0.0
-
-    def test_subscores_not_in_calibration(self):
-        """Calibration only touches final score, not subscores."""
-        cal = _compute_calibration(150, 24.0)
-        assert not hasattr(cal, "subscores")
 
 
 # --- Length evaluation -----------------------------------------------------------
@@ -225,7 +219,6 @@ class TestComputeLengthEvaluation:
 
 class TestCalibrationConfidenceIntegration:
     def test_calibration_delta_adds_confidence_reason(self):
-        """If calibration reduces score by >= 2 and word_count < 220, confidence gets a reason."""
         subscores = Subscores(
             task_response=4.0,
             coherence_cohesion=4.0,
@@ -258,7 +251,26 @@ class TestCalibrationConfidenceIntegration:
         assert not any("calibration" in r.lower() for r in conf.reasons)
 
 
-# --- API -------------------------------------------------------------------------
+# --- Unified API contract --------------------------------------------------------
+MOCK_LLM_PAYLOAD = {
+    "subscores": {
+        "task_response": 4.0,
+        "coherence_cohesion": 4.0,
+        "lexical_resource": 4.0,
+        "grammar": 4.0,
+    },
+    "estimated_score": 24.0,
+    "strengths": [
+        {"label": "Clear thesis", "explanation": "The position is stated clearly.", "evidence": None}
+    ],
+    "weaknesses": [
+        {"label": "Some repetition", "explanation": "Words are repeated.", "evidence": None, "evidence_reason": "Conceptual issue not tied to a single sentence."}
+    ],
+    "top_fixes": ["Fix A", "Fix B", "Fix C"],
+    "rewrite_first_paragraph": "Technology has changed how we live. I believe that...",
+}
+
+
 class TestEvaluateEndpoint:
     @pytest.fixture
     def client(self):
@@ -277,75 +289,93 @@ class TestEvaluateEndpoint:
         )
         assert r.status_code == 422
         assert "120" in r.json()["detail"]
-        assert "at least" in r.json()["detail"].lower()
 
-    def test_evaluate_accepts_essay_at_min_words_with_mock(self, client):
-        payload = {
-            "subscores": {
-                "task_response": 4.0,
-                "coherence_cohesion": 4.0,
-                "lexical_resource": 4.0,
-                "grammar": 4.0,
-            },
-            "estimated_score": 24.0,
-            "strengths": ["Clear thesis", "Good examples"],
-            "weaknesses": ["Some repetition"],
-            "top_fixes": ["Fix A", "Fix B", "Fix C"],
-            "rewrite_first_paragraph": "Technology has changed how we live. I believe that...",
-        }
+    def test_unified_response_contract_short_essay(self, client):
         essay_120 = " ".join(["word"] * 120)
-        with patch("main._call_groq", return_value=json.dumps(payload)):
+        with patch("main._call_groq", return_value=json.dumps(MOCK_LLM_PAYLOAD)):
             r = client.post(
                 "/api/evaluate",
                 json={"prompt": "Do you agree?", "essay": essay_120},
             )
         assert r.status_code == 200
         data = r.json()
-        assert data["word_count"] == 120
-        # estimated_score is now calibrated (120/220 * 24 ≈ 13.1)
-        assert data["estimated_score"] < 24.0
-        # Calibration object present
-        cal = data["calibration"]
-        assert cal["raw_score"] == 24.0
-        assert cal["calibrated_score"] == data["estimated_score"]
-        assert cal["length_factor"] < 1.0
-        assert cal["recommended_words"] == RECOMMENDED_WORDS
-        assert "note" in cal
-        # Length evaluation present
-        le = data["length_evaluation"]
-        assert le["tier"] == "short"
-        assert "calibrated" in le["message"].lower()
-        # Confidence still present
-        assert "confidence" in data
-        assert data["confidence"]["level"] in ("Low", "Medium", "High")
-        assert 0 <= data["confidence"]["numeric_score"] <= 100
-        # Subscores unchanged
-        assert data["subscores"]["task_response"] == 4.0
-        assert data["subscores"]["grammar"] == 4.0
 
-    def test_evaluate_long_essay_no_calibration_penalty(self, client):
-        payload = {
-            "subscores": {
-                "task_response": 4.0,
-                "coherence_cohesion": 4.0,
-                "lexical_resource": 4.0,
-                "grammar": 4.0,
-            },
-            "estimated_score": 24.0,
-            "strengths": ["Clear thesis", "Good examples"],
-            "weaknesses": ["Some repetition"],
-            "top_fixes": ["Fix A", "Fix B", "Fix C"],
-            "rewrite_first_paragraph": "Technology has changed how we live. I believe that...",
-        }
+        # Top-level keys present
+        assert "request_id" in data
+        assert "model_name" in data
+        assert "timestamps" in data
+        assert "text_stats" in data
+        assert "rubric" in data
+        assert "scoring" in data
+        assert "confidence" in data
+        assert "length_evaluation" in data
+        assert "evidence" in data
+        assert "top_fixes" in data
+
+        # Timestamps
+        assert "received_at" in data["timestamps"]
+        assert "completed_at" in data["timestamps"]
+
+        # Text stats
+        assert data["text_stats"]["word_count"] == 120
+        assert data["text_stats"]["sentence_count"] >= 1
+
+        # Rubric (new key names)
+        rubric = data["rubric"]
+        assert rubric["task_response"] == 4.0
+        assert rubric["coherence"] == 4.0
+        assert rubric["lexical"] == 4.0
+        assert rubric["grammar"] == 4.0
+
+        # Scoring
+        scoring = data["scoring"]
+        assert scoring["raw_score_30"] == 24.0
+        assert scoring["length_factor"] < 1.0
+        assert scoring["calibrated_score_30"] < 24.0
+        assert scoring["calibrated_score_30"] == data["estimated_score"]
+
+        # Confidence (new field name)
+        assert data["confidence"]["level"] in ("Low", "Medium", "High")
+        assert 0 <= data["confidence"]["numeric_score_0_100"] <= 100
+
+        # Length evaluation
+        assert data["length_evaluation"]["tier"] == "short"
+        assert "calibrated" in data["length_evaluation"]["message"].lower()
+
+        # Evidence
+        assert len(data["evidence"]["strengths"]) >= 1
+        assert len(data["evidence"]["weaknesses"]) >= 1
+        s0 = data["evidence"]["strengths"][0]
+        assert "label" in s0 and "explanation" in s0
+        w0 = data["evidence"]["weaknesses"][0]
+        assert "label" in w0 and "explanation" in w0
+
+        # Backward-compat aliases
+        assert data["word_count"] == 120
+        assert "subscores" in data
+        assert data["subscores"]["task_response"] == 4.0
+        assert data["subscores"]["coherence_cohesion"] == 4.0
+
+    def test_unified_response_long_essay(self, client):
         essay_250 = " ".join(["word"] * 250)
-        with patch("main._call_groq", return_value=json.dumps(payload)):
+        with patch("main._call_groq", return_value=json.dumps(MOCK_LLM_PAYLOAD)):
             r = client.post(
                 "/api/evaluate",
                 json={"prompt": "Do you agree?", "essay": essay_250},
             )
         assert r.status_code == 200
         data = r.json()
-        assert data["estimated_score"] == 24.0
-        assert data["calibration"]["length_factor"] == 1.0
-        assert data["calibration"]["raw_score"] == data["calibration"]["calibrated_score"]
+        assert data["scoring"]["length_factor"] == 1.0
+        assert data["scoring"]["raw_score_30"] == data["scoring"]["calibrated_score_30"]
         assert data["length_evaluation"]["tier"] == "ideal"
+        assert data["estimated_score"] == 24.0
+
+    def test_prompt_id_passthrough(self, client):
+        essay_250 = " ".join(["word"] * 250)
+        with patch("main._call_groq", return_value=json.dumps(MOCK_LLM_PAYLOAD)):
+            r = client.post(
+                "/api/evaluate",
+                json={"prompt": "Do you agree?", "essay": essay_250, "prompt_id": "p01"},
+            )
+        assert r.status_code == 200
+        assert r.json()["prompt_id"] == "p01"

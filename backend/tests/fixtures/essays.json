@@ -1,0 +1,80 @@
+{
+  "prompt": "Do you agree or disagree with the following statement? Technology has made our lives easier. Use specific reasons and examples to support your answer.",
+  "prompt_id": "tech_easier_v1",
+  "essays": {
+    "short": {
+      "label": "short (~160 words)",
+      "text": "I think technology is good for people. It helps us communicate faster and easier. Many students use phones and computers every day. For example, we can search for information online instead of going to the library. Also, technology helps us stay in touch with friends and family who live far away. We can use video calls and messaging apps. However, some people say technology makes us lazy and less social. I partially agree, but overall I believe the benefits outweigh the drawbacks. In schools, technology provides access to educational resources that were not available before. Students can watch lectures online and practice with interactive tools. Furthermore, technology has improved healthcare by enabling doctors to diagnose diseases more accurately with modern equipment. In conclusion, while there are some negative effects, technology has generally improved our daily lives in many meaningful ways and will continue to do so in the future."
+    },
+    "recommended": {
+      "label": "recommended (~230 words)",
+      "text": "I strongly agree that technology has made our lives easier, and I believe this trend will only continue. First, communication has been revolutionized. Before smartphones and the internet, staying in touch with distant relatives required expensive phone calls or slow postal mail. Now, we can instantly send messages, make video calls, and share photos with anyone around the world at almost no cost. Second, technology has transformed education. Students today have access to online courses, digital textbooks, and interactive learning platforms that make studying more engaging and accessible. For instance, during the pandemic, millions of students continued their education through online platforms like Zoom and Google Classroom. Without technology, this would have been impossible. Third, technology has improved healthcare significantly. Modern diagnostic tools allow doctors to detect illnesses earlier and more accurately. Telemedicine enables patients in remote areas to consult specialists without traveling long distances. However, I acknowledge that technology also brings challenges. Social media can lead to addiction and reduced face-to-face interactions. Additionally, the spread of misinformation online is a growing concern. Despite these drawbacks, the advantages of technology clearly outweigh the disadvantages. Communication is faster, education is more accessible, and healthcare is more effective. As long as we use technology responsibly and critically, it will remain a powerful force for improving our daily lives and connecting communities across the globe."
+    },
+    "ideal": {
+      "label": "ideal (~280 words)",
+      "text": "I strongly agree that technology has made our lives easier, and the evidence for this claim is overwhelming across multiple domains. To begin with, communication has undergone a complete transformation. In the past, people relied on postal services that took days or even weeks to deliver messages. Today, we can connect with anyone in the world instantly through messaging apps, email, and video conferencing. This has not only strengthened personal relationships but also facilitated international business collaboration. Furthermore, technology has revolutionized the field of education. Students now have access to vast online libraries, interactive learning platforms, and educational videos that make complex topics easier to understand. For example, platforms like Khan Academy and Coursera allow learners from any background to access high-quality education for free. During the COVID-19 pandemic, technology proved essential in keeping education alive through remote learning tools such as Zoom and Google Classroom. In addition to communication and education, healthcare has benefited enormously from technological advances. Modern diagnostic equipment can detect diseases at earlier stages, improving treatment outcomes significantly. Telemedicine has made it possible for patients in rural and underserved areas to consult specialists without the burden of long-distance travel. Robotic surgery has also increased precision in complex medical procedures. Of course, technology is not without its downsides. Social media can contribute to anxiety, cyberbullying, and the spread of misinformation. Excessive screen time may lead to health problems such as eye strain and poor posture. These are valid concerns that society must address through better digital literacy programs and responsible usage habits. In conclusion, despite certain challenges, the benefits of technology in communication, education, and healthcare far outweigh the drawbacks. By embracing technology thoughtfully, we can continue to improve our quality of life and build a more connected world."
+    }
+  },
+  "mock_llm_responses": {
+    "short": {
+      "estimated_score": 22.0,
+      "subscores": {
+        "task_response": 3.5,
+        "coherence_cohesion": 3.5,
+        "lexical_resource": 3.0,
+        "grammar": 3.5
+      },
+      "strengths": [
+        {"label": "Clear position", "explanation": "The writer states a clear opinion in favor of technology.", "evidence": "I partially agree, but overall I believe the benefits outweigh the drawbacks."},
+        {"label": "Relevant examples", "explanation": "Concrete examples of technology benefits are provided.", "evidence": "we can search for information online instead of going to the library"}
+      ],
+      "weaknesses": [
+        {"label": "Limited development", "explanation": "Ideas are mentioned but not developed in depth.", "evidence": null, "evidence_reason": "Conceptual issue not tied to a single sentence."},
+        {"label": "Simple vocabulary", "explanation": "Basic word choices reduce the sophistication of the essay.", "evidence": "I think technology is good for people."},
+        {"label": "Weak transitions", "explanation": "Paragraph connections are abrupt and formulaic.", "evidence": null, "evidence_reason": "Conceptual issue not tied to a single sentence."}
+      ],
+      "top_fixes": ["Develop each supporting idea with more detail", "Use more varied and precise vocabulary", "Improve paragraph transitions"],
+      "rewrite_first_paragraph": "Technology has become an integral part of modern life, fundamentally changing how we communicate, learn, and work. I firmly believe that its benefits significantly outweigh any drawbacks."
+    },
+    "recommended": {
+      "estimated_score": 25.0,
+      "subscores": {
+        "task_response": 4.5,
+        "coherence_cohesion": 4.0,
+        "lexical_resource": 4.0,
+        "grammar": 4.0
+      },
+      "strengths": [
+        {"label": "Well-organized structure", "explanation": "The essay follows a clear pattern with introduction, body paragraphs, and conclusion.", "evidence": null},
+        {"label": "Specific examples", "explanation": "The writer provides concrete real-world examples to support arguments.", "evidence": "millions of students continued their education through online platforms like Zoom and Google Classroom"},
+        {"label": "Balanced perspective", "explanation": "The writer acknowledges counterarguments before reaffirming the thesis.", "evidence": "I acknowledge that technology also brings challenges."}
+      ],
+      "weaknesses": [
+        {"label": "Repetitive phrasing", "explanation": "Several sentences begin with similar structures.", "evidence": "Communication is faster, education is more accessible, and healthcare is more effective."},
+        {"label": "Missing counterargument depth", "explanation": "The drawbacks section is underdeveloped compared to the benefits.", "evidence": null, "evidence_reason": "Conceptual issue not tied to a single sentence."}
+      ],
+      "top_fixes": ["Vary sentence openings to avoid repetition", "Expand the counterargument section", "Add a more specific concluding example"],
+      "rewrite_first_paragraph": "The rapid advancement of technology has fundamentally transformed how we live, communicate, and learn. I strongly agree that these changes have made our lives considerably easier, and this trend shows no signs of slowing down."
+    },
+    "ideal": {
+      "estimated_score": 27.0,
+      "subscores": {
+        "task_response": 4.5,
+        "coherence_cohesion": 4.5,
+        "lexical_resource": 4.5,
+        "grammar": 4.5
+      },
+      "strengths": [
+        {"label": "Comprehensive coverage", "explanation": "The essay thoroughly addresses multiple domains affected by technology.", "evidence": null},
+        {"label": "Strong topic sentences", "explanation": "Each paragraph begins with a clear topic sentence that guides the reader.", "evidence": "Furthermore, technology has revolutionized the field of education."},
+        {"label": "Sophisticated vocabulary", "explanation": "The writer uses varied and precise word choices throughout.", "evidence": "facilitated international business collaboration"}
+      ],
+      "weaknesses": [
+        {"label": "Slightly formulaic structure", "explanation": "The essay follows a predictable pattern that could be more creative.", "evidence": null, "evidence_reason": "Conceptual issue not tied to a single sentence."},
+        {"label": "Conclusion could be stronger", "explanation": "The conclusion restates the thesis but does not offer a new insight.", "evidence": "By embracing technology thoughtfully, we can continue to improve our quality of life and build a more connected world."}
+      ],
+      "top_fixes": ["Add a forward-looking insight in the conclusion", "Vary the essay structure for originality", "Include one more specific statistic or fact"],
+      "rewrite_first_paragraph": "In an era defined by rapid technological innovation, few would dispute that our daily lives have been profoundly transformed. I strongly agree that technology has made our lives easier, and the evidence supporting this claim spans communication, education, and healthcare."
+    }
+  }
+}

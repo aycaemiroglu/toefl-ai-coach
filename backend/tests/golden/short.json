@@ -1,0 +1,87 @@
+{
+  "prompt_id": "tech_easier_v1",
+  "model_name": "llama-3.1-8b-instant",
+  "text_stats": {
+    "word_count": 149,
+    "sentence_count": 12
+  },
+  "rubric": {
+    "task_response": 3.5,
+    "coherence": 3.5,
+    "lexical": 3.0,
+    "grammar": 3.5
+  },
+  "scoring": {
+    "raw_score_30": 22.0,
+    "length_factor": 0.6773,
+    "calibrated_score_30": 14.9
+  },
+  "confidence": {
+    "level": "Medium",
+    "numeric_score_0_100": 55,
+    "reasons": [
+      "Essay is shorter than recommended length; scoring is less stable.",
+      "Length-based calibration reduced the score; reliability is lower."
+    ],
+    "signals": {
+      "word_count": 149,
+      "subscore_variance": 0.5,
+      "weakness_count": 3,
+      "has_counterargument_weakness": false,
+      "raw_score": 55.0,
+      "final_score": 22.0
+    }
+  },
+  "length_evaluation": {
+    "tier": "short",
+    "message": "Below recommended length; score calibrated."
+  },
+  "evidence": {
+    "strengths": [
+      {
+        "label": "Clear position",
+        "explanation": "The writer states a clear opinion in favor of technology.",
+        "evidence": "I partially agree, but overall I believe the benefits outweigh the drawbacks."
+      },
+      {
+        "label": "Relevant examples",
+        "explanation": "Concrete examples of technology benefits are provided.",
+        "evidence": "we can search for information online instead of going to the library"
+      }
+    ],
+    "weaknesses": [
+      {
+        "label": "Limited development",
+        "explanation": "Ideas are mentioned but not developed in depth.",
+        "evidence": null,
+        "evidence_reason": "Conceptual issue not tied to a single sentence."
+      },
+      {
+        "label": "Simple vocabulary",
+        "explanation": "Basic word choices reduce the sophistication of the essay.",
+        "evidence": "I think technology is good for people.",
+        "evidence_reason": null
+      },
+      {
+        "label": "Weak transitions",
+        "explanation": "Paragraph connections are abrupt and formulaic.",
+        "evidence": null,
+        "evidence_reason": "Conceptual issue not tied to a single sentence."
+      }
+    ]
+  },
+  "top_fixes": [
+    "Develop each supporting idea with more detail",
+    "Use more varied and precise vocabulary",
+    "Improve paragraph transitions"
+  ],
+  "rewrite_first_paragraph": "Technology has become an integral part of modern life, fundamentally changing how we communicate, learn, and work. I firmly believe that its benefits significantly outweigh any drawbacks.",
+  "estimated_score": 14.9,
+  "subscores": {
+    "task_response": 3.5,
+    "coherence_cohesion": 3.5,
+    "lexical_resource": 3.0,
+    "grammar": 3.5
+  },
+  "word_count": 149
+}
