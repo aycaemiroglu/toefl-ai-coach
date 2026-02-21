@@ -2,41 +2,40 @@
 Invariant tests for scoring, calibration, and confidence.
 
 Protects against:
-- Calibration modifying subscores (they must stay as LLM returned)
-- length_factor != 1 when word_count >= 220
-- calibrated_score > raw_score
+- length_penalty != 1 when word_count >= 220
+- final score > raw score
+- overall_score != scoring.final
 - Confidence being "High" for very short essays
 - Confidence being "Low" for ideal essays with balanced subscores
 """
 
 
 class TestCalibrationInvariants:
-    """Scoring calibration must follow length_factor = min(1, wc / 220)."""
+    """Scoring calibration must follow length_penalty = min(1, wc / 220)."""
 
-    def test_length_factor_one_when_long_enough(self, evaluate_result, essay_key):
+    def test_length_penalty_one_when_long_enough(self, evaluate_result, essay_key):
         _, data, _ = evaluate_result
         wc = data["text_stats"]["word_count"]
         if wc >= 220:
-            assert data["scoring"]["length_factor"] == 1.0
-            assert data["scoring"]["calibrated_score_30"] == data["scoring"]["raw_score_30"]
+            assert data["scoring"]["length_penalty"] == 1.0
+            assert data["scoring"]["final"] == data["scoring"]["raw"]
 
-    def test_calibrated_le_raw_when_short(self, evaluate_result, essay_key):
+    def test_final_le_raw_when_short(self, evaluate_result, essay_key):
         _, data, _ = evaluate_result
         wc = data["text_stats"]["word_count"]
         if wc < 220:
-            assert data["scoring"]["calibrated_score_30"] <= data["scoring"]["raw_score_30"]
-            assert data["scoring"]["length_factor"] < 1.0
+            assert data["scoring"]["final"] <= data["scoring"]["raw"]
+            assert data["scoring"]["length_penalty"] < 1.0
 
-    def test_rubric_values_match_subscores(self, evaluate_result):
-        """Rubric and backward-compat subscores must reflect the same LLM values."""
+    def test_overall_score_is_scoring_final(self, evaluate_result):
+        """overall_score must always equal scoring.final."""
         _, data, _ = evaluate_result
-        assert data["rubric"]["task_response"] == data["subscores"]["task_response"]
-        assert data["rubric"]["grammar"] == data["subscores"]["grammar"]
+        assert data["overall_score"] == data["scoring"]["final"]
 
-    def test_length_evaluation_tier_matches_word_count(self, evaluate_result):
+    def test_length_tier_matches_word_count(self, evaluate_result):
         _, data, _ = evaluate_result
         wc = data["text_stats"]["word_count"]
-        tier = data["length_evaluation"]["tier"]
+        tier = data["length"]["tier"]
         if wc < 220:
             assert tier == "short"
         elif wc < 250:

@@ -103,8 +103,8 @@ def evaluate_batch(
                 out.write(json.dumps(result, ensure_ascii=False) + "\n")
                 logger.info(
                     "  -> score=%s  tier=%s  confidence=%s",
-                    result["scoring"]["calibrated_score_30"],
-                    result["length_evaluation"]["tier"],
+                    result["scoring"]["final"],
+                    result["length"]["tier"],
                     result["confidence"]["level"],
                 )
             except Exception as e:

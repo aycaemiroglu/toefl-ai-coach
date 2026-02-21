@@ -26,7 +26,7 @@ from main import app
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
 
-DYNAMIC_KEYS = {"request_id", "timestamps", "latency_ms"}
+DYNAMIC_KEYS = {"request_id", "timestamps"}
 
 
 def _strip_dynamic(data: dict) -> dict:
