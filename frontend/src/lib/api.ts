@@ -13,11 +13,6 @@ export interface EvaluatePayload {
 
 // --- New unified contract types ---
 
-export interface Timestamps {
-  received_at: string
-  completed_at: string
-}
-
 export interface TextStats {
   word_count: number
   sentence_count: number
@@ -31,9 +26,9 @@ export interface Rubric {
 }
 
 export interface Scoring {
-  raw_score_30: number
-  length_factor: number
-  calibrated_score_30: number
+  raw: number
+  length_penalty: number
+  final: number
 }
 
 export interface ConfidenceSignals {
@@ -41,15 +36,21 @@ export interface ConfidenceSignals {
   subscore_variance: number
   weakness_count: number
   has_counterargument_weakness: boolean
-  raw_score: number
-  final_score: number
+  confidence_before_clamp: number
+  confidence_after_clamp: number
 }
 
 export interface Confidence {
   level: 'Low' | 'Medium' | 'High'
-  numeric_score_0_100: number
+  score: number
   reasons: string[]
   signals: ConfidenceSignals
+}
+
+export interface Timestamps {
+  received_at: string
+  completed_at: string
+  latency_ms: number
 }
 
 export interface LengthEvaluation {
@@ -67,7 +68,7 @@ export interface WeaknessItem {
   label: string
   explanation: string
   evidence: string | null
-  evidence_reason?: string | null
+  evidence_fallback?: string | null
 }
 
 export interface Evidence {
@@ -75,32 +76,20 @@ export interface Evidence {
   weaknesses: WeaknessItem[]
 }
 
-// Backward-compat alias
-export interface Subscores {
-  task_response: number
-  coherence_cohesion: number
-  lexical_resource: number
-  grammar: number
-}
-
 export interface EvaluateResponse {
   request_id: string
   prompt_id: string | null
   model_name: string
+  overall_score: number
   timestamps: Timestamps
   text_stats: TextStats
   rubric: Rubric
   scoring: Scoring
   confidence: Confidence
-  length_evaluation: LengthEvaluation
+  length: LengthEvaluation
   evidence: Evidence
   top_fixes: string[]
   rewrite_first_paragraph: string
-  // Backward-compat aliases
-  estimated_score: number
-  subscores: Subscores
-  word_count: number
-  latency_ms: number
 }
 
 export class EvaluateError extends Error {

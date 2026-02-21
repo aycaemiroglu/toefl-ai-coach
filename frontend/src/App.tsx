@@ -260,19 +260,19 @@ export default function App() {
         <section style={styles.result} aria-live="polite">
           <h2 style={styles.resultTitle}>Feedback</h2>
           <p style={styles.meta}>
-            Model: {result.model_name} · {result.latency_ms} ms · {result.text_stats.word_count} words · {result.text_stats.sentence_count} sentences
+            Model: {result.model_name} · {result.timestamps.latency_ms} ms · {result.text_stats.word_count} words · {result.text_stats.sentence_count} sentences
           </p>
 
           <div style={styles.scoreBox}>
             <div style={styles.scoreLabel}>Overall score</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <div style={styles.scoreValue}>
-                {result.scoring.calibrated_score_30.toFixed(1)} / 30
+                {result.scoring.final.toFixed(1)} / 30
               </div>
-              {result.scoring.length_factor < 1 && (
+              {result.scoring.length_penalty < 1 && (
                 <span
                   style={styles.calibrationBadge}
-                  title={`Raw: ${result.scoring.raw_score_30.toFixed(1)} · Factor: ${result.scoring.length_factor.toFixed(2)} · Final: ${result.scoring.calibrated_score_30.toFixed(1)}`}
+                  title={`Raw: ${result.scoring.raw.toFixed(1)} · Penalty: ${result.scoring.length_penalty.toFixed(2)} · Final: ${result.scoring.final.toFixed(1)}`}
                 >
                   Calibrated
                 </span>
@@ -292,20 +292,20 @@ export default function App() {
                 </span>
               )}
             </div>
-            {result.scoring.length_factor < 1 && (
+            {result.scoring.length_penalty < 1 && (
               <div style={styles.calibrationNote}>
-                Shorter than recommended length; score reduced. (Raw: {result.scoring.raw_score_30.toFixed(1)}, x{result.scoring.length_factor.toFixed(2)})
+                Shorter than recommended length; score reduced. (Raw: {result.scoring.raw.toFixed(1)}, x{result.scoring.length_penalty.toFixed(2)})
               </div>
             )}
-            {result.length_evaluation && (
+            {result.length && (
               <div style={styles.lengthMessage}>
-                {result.length_evaluation.message}
+                {result.length.message}
               </div>
             )}
             {result.confidence && (
               <>
                 <div style={styles.confidenceNumeric}>
-                  Confidence: {result.confidence.numeric_score_0_100}/100
+                  Confidence: {result.confidence.score}/100
                 </div>
                 {result.confidence.reasons && result.confidence.reasons.length > 0 && (
                   <div style={styles.confidenceReasons}>
@@ -368,7 +368,7 @@ export default function App() {
                   </blockquote>
                 ) : (
                   <p style={{ margin: '4px 0 0', fontSize: '0.85em', color: '#888' }}>
-                    No direct quote available{w.evidence_reason ? ` — ${w.evidence_reason}` : ''}
+                    No direct quote available{w.evidence_fallback ? ` — ${w.evidence_fallback}` : ''}
                   </p>
                 )}
               </li>
