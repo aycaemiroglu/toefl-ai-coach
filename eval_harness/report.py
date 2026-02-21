@@ -40,21 +40,21 @@ def generate_summary(results: list[dict[str, Any]], output_path: Path) -> str:
     ok = [r for r in results if "_error" not in r]
     errored = [r for r in results if "_error" in r]
 
-    tiers = Counter(_safe(ok, "length_evaluation.tier"))
+    tiers = Counter(_safe(ok, "length.tier"))
     confidence_levels = Counter(_safe(ok, "confidence.level"))
 
-    raw_scores = _safe(ok, "scoring.raw_score_30")
-    cal_scores = _safe(ok, "scoring.calibrated_score_30")
-    factors = _safe(ok, "scoring.length_factor")
-    conf_numerics = _safe(ok, "confidence.numeric_score_0_100")
+    raw_scores = _safe(ok, "scoring.raw")
+    cal_scores = _safe(ok, "scoring.final")
+    factors = _safe(ok, "scoring.length_penalty")
+    conf_numerics = _safe(ok, "confidence.score")
 
     deltas = [r - c for r, c in zip(raw_scores, cal_scores)]
 
     # Confidence average by tier
     conf_by_tier: dict[str, list[int]] = {}
     for r in ok:
-        tier = r.get("length_evaluation", {}).get("tier", "unknown")
-        ns = r.get("confidence", {}).get("numeric_score_0_100")
+        tier = r.get("length", {}).get("tier", "unknown")
+        ns = r.get("confidence", {}).get("score")
         if ns is not None:
             conf_by_tier.setdefault(tier, []).append(ns)
 

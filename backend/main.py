@@ -8,20 +8,16 @@ Unified response contract (POST /api/evaluate):
   "timestamps": { "received_at": "2026-02-08T...", "completed_at": "2026-02-08T..." },
   "text_stats": { "word_count": 205, "sentence_count": 12 },
   "rubric": { "task_response": 4.5, "coherence": 4.0, "lexical": 4.0, "grammar": 3.5 },
-  "scoring": { "raw_score_30": 24.0, "length_factor": 0.9318, "calibrated_score_30": 22.4 },
-  "confidence": { "level": "Medium", "numeric_score_0_100": 60, "reasons": [...], "signals": {...} },
-  "length_evaluation": { "tier": "short", "message": "Below recommended length; score calibrated." },
+  "overall_score": 22.4,
+  "scoring": { "raw": 24.0, "length_penalty": 0.9318, "final": 22.4 },
+  "confidence": { "level": "Medium", "score": 60, "reasons": [...], "signals": {...} },
+  "length": { "tier": "short", "message": "Below recommended length; score calibrated." },
   "evidence": {
     "strengths": [{ "label": "...", "explanation": "...", "evidence": "...|null" }],
-    "weaknesses": [{ "label": "...", "explanation": "...", "evidence": "...|null", "evidence_reason": "...|null" }]
+    "weaknesses": [{ "label": "...", "explanation": "...", "evidence": "...|null", "evidence_fallback": "...|null" }]
   },
   "top_fixes": [...],
-  "rewrite_first_paragraph": "...",
-  // Backward-compat aliases:
-  "estimated_score": 22.4,
-  "subscores": { "task_response": 4.5, "coherence_cohesion": 4.0, "lexical_resource": 4.0, "grammar": 3.5 },
-  "word_count": 205,
-  "latency_ms": 1520
+  "rewrite_first_paragraph": "..."
 }
 """
 import json
@@ -76,6 +72,7 @@ class EvaluateRequest(BaseModel):
 class Timestamps(BaseModel):
     received_at: str
     completed_at: str
+    latency_ms: int
 
 
 class TextStats(BaseModel):
@@ -91,9 +88,9 @@ class Rubric(BaseModel):
 
 
 class Scoring(BaseModel):
-    raw_score_30: float = Field(..., ge=0, le=30)
-    length_factor: float = Field(..., ge=0, le=1)
-    calibrated_score_30: float = Field(..., ge=0, le=30)
+    raw: float = Field(..., ge=0, le=30)
+    length_penalty: float = Field(..., ge=0, le=1)
+    final: float = Field(..., ge=0, le=30)
 
 
 ConfidenceLevel = Literal["Low", "Medium", "High"]
@@ -104,13 +101,13 @@ class ConfidenceSignals(BaseModel):
     subscore_variance: float
     weakness_count: int
     has_counterargument_weakness: bool
-    raw_score: float
-    final_score: float
+    confidence_before_clamp: float
+    confidence_after_clamp: int
 
 
 class Confidence(BaseModel):
     level: ConfidenceLevel
-    numeric_score_0_100: int = Field(..., ge=0, le=100)
+    score: int = Field(..., ge=0, le=100)
     reasons: list[str]
     signals: ConfidenceSignals
 
@@ -133,7 +130,7 @@ class WeaknessItem(BaseModel):
     label: str
     explanation: str
     evidence: str | None = None
-    evidence_reason: str | None = None
+    evidence_fallback: str | None = None
 
 
 class Evidence(BaseModel):
@@ -141,33 +138,21 @@ class Evidence(BaseModel):
     weaknesses: list[WeaknessItem]
 
 
-# -- Backward-compat alias for subscores (old key names) --
-class Subscores(BaseModel):
-    task_response: float = Field(..., ge=0, le=5)
-    coherence_cohesion: float = Field(..., ge=0, le=5)
-    lexical_resource: float = Field(..., ge=0, le=5)
-    grammar: float = Field(..., ge=0, le=5)
-
-
-# -- Unified response --
+# -- Unified response (canonical only, no aliases) --
 class EvaluateResponse(BaseModel):
     request_id: str
     prompt_id: str | None = None
     model_name: str
+    overall_score: float = Field(..., ge=0, le=30)
     timestamps: Timestamps
     text_stats: TextStats
     rubric: Rubric
     scoring: Scoring
     confidence: Confidence
-    length_evaluation: LengthEvaluation
+    length: LengthEvaluation
     evidence: Evidence
     top_fixes: list[str] = Field(..., min_length=3, max_length=3)
     rewrite_first_paragraph: str
-    # Backward-compat aliases (frontend may still use these)
-    estimated_score: float = Field(..., ge=0, le=30)
-    subscores: Subscores
-    word_count: int
-    latency_ms: int
 
 
 # --- App ---------------------------------------------------------------------
@@ -229,7 +214,7 @@ def _compute_calibration(wc: int, raw_score: float) -> _CalibrationResult:
 # --- Confidence computation (server-side only) ---
 def _compute_confidence(
     word_count: int,
-    subscores: Subscores,
+    rubric: Rubric,
     final_score: float,
     weaknesses: list[dict[str, Any]],
     calibration_delta: float = 0.0,
@@ -242,12 +227,11 @@ def _compute_confidence(
     score = 100.0
     reasons: list[str] = []
     
-    # Signals for debugging
     subscore_values = [
-        subscores.task_response,
-        subscores.coherence_cohesion,
-        subscores.lexical_resource,
-        subscores.grammar,
+        rubric.task_response,
+        rubric.coherence,
+        rubric.lexical,
+        rubric.grammar,
     ]
     subscore_variance = max(subscore_values) - min(subscore_values)
     weakness_count = len(weaknesses)
@@ -287,7 +271,7 @@ def _compute_confidence(
     if weakness_count >= 3 and final_score >= 25:
         score -= 15
         reasons.append("Multiple weaknesses detected; overall score may be optimistic.")
-    if has_counterargument_weakness and subscores.task_response >= 4:
+    if has_counterargument_weakness and rubric.task_response >= 4:
         score -= 10
         reasons.append("Missing counterargument should reduce task reliability.")
     
@@ -296,11 +280,9 @@ def _compute_confidence(
         score -= 10
         reasons.append("Length-based calibration reduced the score; reliability is lower.")
     
-    raw_score = score  # Before clamping
-    # Clamp to [0, 100]
+    before_clamp = score
     score = max(0, min(100, int(round(score))))
     
-    # Map to level
     if score >= 80:
         level: ConfidenceLevel = "High"
     elif score >= 50:
@@ -308,7 +290,6 @@ def _compute_confidence(
     else:
         level = "Low"
     
-    # If no reasons (shouldn't happen), add a default
     if not reasons:
         reasons.append("Confidence computed from essay characteristics.")
     
@@ -317,11 +298,10 @@ def _compute_confidence(
         subscore_variance=subscore_variance,
         weakness_count=weakness_count,
         has_counterargument_weakness=has_counterargument_weakness,
-        raw_score=raw_score,
-        final_score=final_score,
+        confidence_before_clamp=before_clamp,
+        confidence_after_clamp=score,
     )
     
-    # Debug logging (if DEBUG env var set)
     if os.getenv("DEBUG_CONFIDENCE", "").lower() in ("1", "true", "yes"):
         logger.info(
             "Confidence computed: level=%s, score=%d, reasons=%s, signals=%s",
@@ -333,7 +313,7 @@ def _compute_confidence(
     
     return Confidence(
         level=level,
-        numeric_score_0_100=score,
+        score=score,
         reasons=reasons,
         signals=signals,
     )
@@ -573,7 +553,7 @@ def _validate_and_shape_detailed(raw: dict[str, Any], essay: str) -> dict[str, A
             label = item.get("label")
             explanation = item.get("explanation")
             evidence = item.get("evidence")
-            evidence_reason = item.get("evidence_reason")
+            fallback = item.get("evidence_reason") or item.get("evidence_fallback")
             if not isinstance(label, str) or not isinstance(explanation, str):
                 return None
             evidence_clean = _ensure_evidence_substring(
@@ -582,10 +562,10 @@ def _validate_and_shape_detailed(raw: dict[str, Any], essay: str) -> dict[str, A
                 max_words=25,
                 log_reject=True,
             )
-            reason = evidence_reason if isinstance(evidence_reason, str) and evidence_reason.strip() else None
+            reason = fallback if isinstance(fallback, str) and fallback.strip() else None
             if evidence_clean is None and reason is None:
                 reason = "Conceptual issue not tied to a single sentence."
-            return {"label": label, "explanation": explanation, "evidence": evidence_clean, "evidence_reason": reason}
+            return {"label": label, "explanation": explanation, "evidence": evidence_clean, "evidence_fallback": reason}
 
         strengths_raw = raw.get("strengths")
         weaknesses_raw = raw.get("weaknesses")
@@ -611,7 +591,7 @@ def _validate_and_shape_detailed(raw: dict[str, Any], essay: str) -> dict[str, A
                 # Ensure it's substring (already is from _get_sentences)
                 if lexical_evidence.strip() in essay or _normalize_quotes(lexical_evidence.strip()) in _normalize_quotes(essay):
                     w["evidence"] = lexical_evidence.strip()
-                    w["evidence_reason"] = None
+                    w["evidence_fallback"] = None
                     logger.info(
                         "evidence_overridden=true | lexical weakness: label=%r, trigger_words=%s, evidence=%r",
                         w.get("label"),
@@ -700,55 +680,58 @@ def evaluate_essay_core(
     calibration_delta = raw_score - calibrated_score
     length_eval = _compute_length_evaluation(words)
 
-    subscores_obj = Subscores(
+    rubric_obj = Rubric(
         task_response=sub["task_response"],
-        coherence_cohesion=sub["coherence_cohesion"],
-        lexical_resource=sub["lexical_resource"],
+        coherence=sub["coherence_cohesion"],
+        lexical=sub["lexical_resource"],
         grammar=sub["grammar"],
     )
 
     weaknesses_for_confidence = shaped["weaknesses"]
     confidence = _compute_confidence(
-        words, subscores_obj, raw_score, weaknesses_for_confidence,
+        words, rubric_obj, raw_score, weaknesses_for_confidence,
         calibration_delta=calibration_delta,
     )
 
-    return EvaluateResponse(
+    response = EvaluateResponse(
         request_id=request_id,
         prompt_id=prompt_id,
         model_name=GROQ_MODEL,
-        timestamps=Timestamps(received_at=received_at, completed_at=completed_at),
-        text_stats=TextStats(word_count=words, sentence_count=sentences),
-        rubric=Rubric(
-            task_response=sub["task_response"],
-            coherence=sub["coherence_cohesion"],
-            lexical=sub["lexical_resource"],
-            grammar=sub["grammar"],
+        overall_score=calibrated_score,
+        timestamps=Timestamps(
+            received_at=received_at,
+            completed_at=completed_at,
+            latency_ms=latency_ms,
         ),
+        text_stats=TextStats(word_count=words, sentence_count=sentences),
+        rubric=rubric_obj,
         scoring=Scoring(
-            raw_score_30=raw_score,
-            length_factor=calibration.length_factor,
-            calibrated_score_30=calibrated_score,
+            raw=raw_score,
+            length_penalty=calibration.length_factor,
+            final=calibrated_score,
         ),
         confidence=confidence,
-        length_evaluation=length_eval,
+        length=length_eval,
         evidence=Evidence(
             strengths=[StrengthItem(**s) for s in shaped["strengths"]],
             weaknesses=[WeaknessItem(**w) for w in shaped["weaknesses"]],
         ),
         top_fixes=shaped["top_fixes"],
         rewrite_first_paragraph=shaped["rewrite_first_paragraph"],
-        estimated_score=calibrated_score,
-        subscores=subscores_obj,
-        word_count=words,
-        latency_ms=latency_ms,
     )
+
+    if os.getenv("STRICT_SCHEMA", "1") == "1":
+        _BANNED = {"estimated_score", "subscores", "coherence_cohesion", "lexical_resource"}
+        found = _BANNED & set(response.model_dump().keys())
+        assert not found, f"Alias keys leaked into response: {found}"
+
+    return response
 
 
 @app.post(
     "/api/evaluate",
     summary="Evaluate TOEFL essay",
-    response_description="Unified evaluation response with rubric, scoring, confidence, evidence, and backward-compat aliases.",
+    response_description="Canonical evaluation response with rubric, scoring, confidence, and evidence.",
 )
 def evaluate(request: EvaluateRequest) -> EvaluateResponse:
     try:

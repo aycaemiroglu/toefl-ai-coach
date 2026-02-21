@@ -23,7 +23,7 @@ from main import (
     FULL_CONFIDENCE_WORDS,
     MIN_WORDS,
     RECOMMENDED_WORDS,
-    Subscores,
+    Rubric,
     _compute_calibration,
     _compute_confidence,
     _compute_length_evaluation,
@@ -69,48 +69,48 @@ class TestSentenceCount:
 # --- Confidence computation -----------------------------------------------------
 class TestComputeConfidence:
     def test_long_essay_balanced_subscores_high_confidence(self):
-        subscores = Subscores(
+        rubric = Rubric(
             task_response=4.0,
-            coherence_cohesion=4.0,
-            lexical_resource=4.0,
+            coherence=4.0,
+            lexical=4.0,
             grammar=4.0,
         )
         conf = _compute_confidence(
             word_count=260,
-            subscores=subscores,
+            rubric=rubric,
             final_score=24.0,
             weaknesses=[],
         )
         assert conf.level == "High"
-        assert conf.numeric_score_0_100 >= 80
+        assert conf.score >= 80
         assert conf.reasons
         assert conf.signals.word_count == 260
 
     def test_short_essay_penalty(self):
-        subscores = Subscores(
+        rubric = Rubric(
             task_response=4.0,
-            coherence_cohesion=4.0,
-            lexical_resource=4.0,
+            coherence=4.0,
+            lexical=4.0,
             grammar=4.0,
         )
         conf = _compute_confidence(
             word_count=170,
-            subscores=subscores,
+            rubric=rubric,
             final_score=22.0,
             weaknesses=[],
         )
         assert any("shorter" in r.lower() or "length" in r.lower() for r in conf.reasons)
 
     def test_subscore_variance_penalty(self):
-        subscores = Subscores(
+        rubric = Rubric(
             task_response=2.0,
-            coherence_cohesion=4.0,
-            lexical_resource=4.0,
+            coherence=4.0,
+            lexical=4.0,
             grammar=5.0,
         )
         conf = _compute_confidence(
             word_count=250,
-            subscores=subscores,
+            rubric=rubric,
             final_score=20.0,
             weaknesses=[],
         )
@@ -118,42 +118,42 @@ class TestComputeConfidence:
         assert any("variance" in r.lower() or "vary" in r.lower() for r in conf.reasons)
 
     def test_high_score_short_essay_penalty(self):
-        subscores = Subscores(
+        rubric = Rubric(
             task_response=5.0,
-            coherence_cohesion=5.0,
-            lexical_resource=5.0,
+            coherence=5.0,
+            lexical=5.0,
             grammar=5.0,
         )
         conf = _compute_confidence(
             word_count=200,
-            subscores=subscores,
+            rubric=rubric,
             final_score=26.0,
             weaknesses=[],
         )
         assert any("short" in r.lower() or "generosity" in r.lower() for r in conf.reasons)
 
     def test_confidence_score_clamped_0_100(self):
-        subscores = Subscores(
+        rubric = Rubric(
             task_response=1.0,
-            coherence_cohesion=1.0,
-            lexical_resource=1.0,
+            coherence=1.0,
+            lexical=1.0,
             grammar=1.0,
         )
         conf = _compute_confidence(
             word_count=100,
-            subscores=subscores,
+            rubric=rubric,
             final_score=28.0,
             weaknesses=[{"label": "x"}, {"label": "y"}, {"label": "counterargument"}],
         )
-        assert 0 <= conf.numeric_score_0_100 <= 100
+        assert 0 <= conf.score <= 100
 
     def test_counterargument_weakness_signal(self):
         conf = _compute_confidence(
             word_count=250,
-            subscores=Subscores(
+            rubric=Rubric(
                 task_response=4.5,
-                coherence_cohesion=4.0,
-                lexical_resource=4.0,
+                coherence=4.0,
+                lexical=4.0,
                 grammar=4.0,
             ),
             final_score=24.0,
@@ -219,15 +219,15 @@ class TestComputeLengthEvaluation:
 
 class TestCalibrationConfidenceIntegration:
     def test_calibration_delta_adds_confidence_reason(self):
-        subscores = Subscores(
+        rubric = Rubric(
             task_response=4.0,
-            coherence_cohesion=4.0,
-            lexical_resource=4.0,
+            coherence=4.0,
+            lexical=4.0,
             grammar=4.0,
         )
         conf = _compute_confidence(
             word_count=180,
-            subscores=subscores,
+            rubric=rubric,
             final_score=24.0,
             weaknesses=[],
             calibration_delta=4.4,
@@ -235,15 +235,15 @@ class TestCalibrationConfidenceIntegration:
         assert any("calibration" in r.lower() for r in conf.reasons)
 
     def test_no_calibration_penalty_when_long_enough(self):
-        subscores = Subscores(
+        rubric = Rubric(
             task_response=4.0,
-            coherence_cohesion=4.0,
-            lexical_resource=4.0,
+            coherence=4.0,
+            lexical=4.0,
             grammar=4.0,
         )
         conf = _compute_confidence(
             word_count=250,
-            subscores=subscores,
+            rubric=rubric,
             final_score=24.0,
             weaknesses=[],
             calibration_delta=0.0,
@@ -259,12 +259,12 @@ MOCK_LLM_PAYLOAD = {
         "lexical_resource": 4.0,
         "grammar": 4.0,
     },
-    "estimated_score": 24.0,
+    "estimated_score": 24.0,  # LLM still returns these internally; backend maps to canonical
     "strengths": [
         {"label": "Clear thesis", "explanation": "The position is stated clearly.", "evidence": None}
     ],
     "weaknesses": [
-        {"label": "Some repetition", "explanation": "Words are repeated.", "evidence": None, "evidence_reason": "Conceptual issue not tied to a single sentence."}
+        {"label": "Some repetition", "explanation": "Words are repeated.", "evidence": None, "evidence_fallback": "Conceptual issue not tied to a single sentence."}
     ],
     "top_fixes": ["Fix A", "Fix B", "Fix C"],
     "rewrite_first_paragraph": "Technology has changed how we live. I believe that...",
@@ -308,53 +308,41 @@ class TestEvaluateEndpoint:
         assert "rubric" in data
         assert "scoring" in data
         assert "confidence" in data
-        assert "length_evaluation" in data
+        assert "length" in data
         assert "evidence" in data
         assert "top_fixes" in data
 
-        # Timestamps
         assert "received_at" in data["timestamps"]
         assert "completed_at" in data["timestamps"]
+        assert data["timestamps"]["latency_ms"] >= 0
 
-        # Text stats
         assert data["text_stats"]["word_count"] == 120
         assert data["text_stats"]["sentence_count"] >= 1
 
-        # Rubric (new key names)
         rubric = data["rubric"]
         assert rubric["task_response"] == 4.0
         assert rubric["coherence"] == 4.0
         assert rubric["lexical"] == 4.0
         assert rubric["grammar"] == 4.0
 
-        # Scoring
         scoring = data["scoring"]
-        assert scoring["raw_score_30"] == 24.0
-        assert scoring["length_factor"] < 1.0
-        assert scoring["calibrated_score_30"] < 24.0
-        assert scoring["calibrated_score_30"] == data["estimated_score"]
+        assert scoring["raw"] == 24.0
+        assert scoring["length_penalty"] < 1.0
+        assert scoring["final"] < 24.0
+        assert data["overall_score"] == scoring["final"]
 
-        # Confidence (new field name)
         assert data["confidence"]["level"] in ("Low", "Medium", "High")
-        assert 0 <= data["confidence"]["numeric_score_0_100"] <= 100
+        assert 0 <= data["confidence"]["score"] <= 100
 
-        # Length evaluation
-        assert data["length_evaluation"]["tier"] == "short"
-        assert "calibrated" in data["length_evaluation"]["message"].lower()
+        assert data["length"]["tier"] == "short"
+        assert "calibrated" in data["length"]["message"].lower()
 
-        # Evidence
         assert len(data["evidence"]["strengths"]) >= 1
         assert len(data["evidence"]["weaknesses"]) >= 1
-        s0 = data["evidence"]["strengths"][0]
-        assert "label" in s0 and "explanation" in s0
-        w0 = data["evidence"]["weaknesses"][0]
-        assert "label" in w0 and "explanation" in w0
 
-        # Backward-compat aliases
-        assert data["word_count"] == 120
-        assert "subscores" in data
-        assert data["subscores"]["task_response"] == 4.0
-        assert data["subscores"]["coherence_cohesion"] == 4.0
+        # Aliases must NOT exist
+        for banned in ("estimated_score", "subscores", "word_count", "latency_ms"):
+            assert banned not in data, f"Alias '{banned}' still in response"
 
     def test_unified_response_long_essay(self, client):
         essay_250 = " ".join(["word"] * 250)
@@ -365,10 +353,10 @@ class TestEvaluateEndpoint:
             )
         assert r.status_code == 200
         data = r.json()
-        assert data["scoring"]["length_factor"] == 1.0
-        assert data["scoring"]["raw_score_30"] == data["scoring"]["calibrated_score_30"]
-        assert data["length_evaluation"]["tier"] == "ideal"
-        assert data["estimated_score"] == 24.0
+        assert data["scoring"]["length_penalty"] == 1.0
+        assert data["scoring"]["raw"] == data["scoring"]["final"]
+        assert data["length"]["tier"] == "ideal"
+        assert data["overall_score"] == 24.0
 
     def test_prompt_id_passthrough(self, client):
         essay_250 = " ".join(["word"] * 250)
