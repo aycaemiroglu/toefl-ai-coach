@@ -28,6 +28,7 @@ GROQ_API_KEY=gsk_your_key_here
 | **Backend (FastAPI)** | `uvicorn backend.main:app --reload --port 8000` | Run in venv; needs GROQ_API_KEY in `.env` |
 | **React frontend** | `cd frontend && npm install && npm run dev` | Needs backend on port 8000; opens http://localhost:3000 |
 | **Synthetic essay generation** (30 essays) | `python scripts/generate_essays.py` | Uses Groq API; `--dry-run` for mock |
+| **Offline evaluation harness** | `python -m eval_harness -i data/essays -o results` | Batch-scores essays; produces JSONL + summary |
 
 ### 3. Synthetic essays (scripts)
 
@@ -74,11 +75,54 @@ toefl-ai-coach/
 ├── data/           # Essay templates, generated data (data/essays/ ignored)
 ├── docs/           # Design and integration notes
 ├── frontend/       # React app (Vite) for writing feedback UI
+├── eval_harness/   # Offline batch evaluation (CLI + report)
 ├── results/        # Experiment outputs (ignored)
 ├── scripts/        # generate_essays.py, etc.
 ├── .env             # GROQ_API_KEY (create locally, do not commit)
 ├── requirements.txt
 └── README.md
+```
+
+---
+
+## How to run offline evaluation
+
+The evaluation harness runs every essay in a folder through the **same `evaluate_essay_core` function** used by the FastAPI endpoint — no duplicated logic.
+
+### Basic usage
+
+```bash
+source .venv/bin/activate
+python -m eval_harness --input data/essays --out results
+```
+
+### CLI options
+
+| Flag | Description |
+|------|-------------|
+| `--input`, `-i` | Directory containing `.txt` and/or `.json` essay files (required) |
+| `--out`, `-o` | Output directory for `results.jsonl` and `summary.md` (default: `results`) |
+| `--seed`, `-s` | Random seed for deterministic runs |
+| `--delay`, `-d` | Seconds between LLM calls to avoid rate-limits (default: 0) |
+| `--verbose`, `-v` | Enable debug-level logging |
+
+### Input formats
+
+- **`.txt`** — entire file is the essay text; uses a default prompt.
+- **`.json`** — must contain an `"essay"` field; optionally `"prompt"`, `"prompt_id"`, `"level"`.
+
+### Outputs
+
+| File | Contents |
+|------|----------|
+| `results/results.jsonl` | One JSON object per essay — full evaluation response including `essay_text`, scoring, confidence, evidence, and `_meta` (source file, level) |
+| `results/summary.md` | Aggregated report: length tier distribution, raw vs calibrated averages, calibration impact buckets, confidence distribution by tier, evidence quality (strengths + weaknesses + substring verification), top 10 weakness labels |
+
+### Example
+
+```bash
+# Deterministic run with 1s delay between API calls
+python -m eval_harness -i data/essays -o results --seed 42 --delay 1 -v
 ```
 
 ---
