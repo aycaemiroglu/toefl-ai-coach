@@ -58,10 +58,17 @@ export interface LengthEvaluation {
   message: string
 }
 
+export interface LlmConfig {
+  temperature: number
+  max_tokens: number
+  prompt_version: string
+}
+
 export interface StrengthItem {
   label: string
   explanation: string
   evidence: string | null
+  evidence_fallback?: string | null
 }
 
 export interface WeaknessItem {
@@ -85,6 +92,7 @@ export interface EvaluateResponse {
   text_stats: TextStats
   rubric: Rubric
   scoring: Scoring
+  llm_config: LlmConfig
   confidence: Confidence
   length: LengthEvaluation
   evidence: Evidence
