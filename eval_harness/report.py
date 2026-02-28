@@ -58,19 +58,46 @@ def generate_summary(results: list[dict[str, Any]], output_path: Path) -> str:
         if ns is not None:
             conf_by_tier.setdefault(tier, []).append(ns)
 
-    # Evidence stats
+    # Evidence stats — weaknesses
     total_weaknesses = 0
-    with_evidence = 0
-    with_null = 0
+    weak_with_evidence = 0
+    weak_with_null = 0
     weakness_labels: list[str] = []
     for r in ok:
         for w in r.get("evidence", {}).get("weaknesses", []):
             total_weaknesses += 1
             weakness_labels.append(w.get("label", "unknown"))
             if w.get("evidence") is not None:
-                with_evidence += 1
+                weak_with_evidence += 1
             else:
-                with_null += 1
+                weak_with_null += 1
+
+    # Evidence stats — strengths
+    total_strengths = 0
+    str_with_evidence = 0
+    str_with_null = 0
+    for r in ok:
+        for s in r.get("evidence", {}).get("strengths", []):
+            total_strengths += 1
+            if s.get("evidence") is not None:
+                str_with_evidence += 1
+            else:
+                str_with_null += 1
+
+    # Evidence verification against essay_text
+    evidence_mismatches = 0
+    evidence_checked = 0
+    for r in ok:
+        essay_text = r.get("essay_text", "")
+        if not essay_text:
+            continue
+        for bucket in ("strengths", "weaknesses"):
+            for item in r.get("evidence", {}).get(bucket, []):
+                ev = item.get("evidence")
+                if ev is not None:
+                    evidence_checked += 1
+                    if ev not in essay_text:
+                        evidence_mismatches += 1
 
     top_labels = Counter(weakness_labels).most_common(10)
 
@@ -147,11 +174,28 @@ def generate_summary(results: list[dict[str, Any]], output_path: Path) -> str:
         "",
         "## Evidence Quality",
         "",
+        "### Weaknesses",
+        "",
         f"| Metric | Value |",
         f"|--------|------:|",
         f"| Total weaknesses | {total_weaknesses} |",
-        f"| With evidence (substring) | {with_evidence} ({_pct(with_evidence, total_weaknesses)}) |",
-        f"| With null evidence (+ reason) | {with_null} ({_pct(with_null, total_weaknesses)}) |",
+        f"| With evidence (substring) | {weak_with_evidence} ({_pct(weak_with_evidence, total_weaknesses)}) |",
+        f"| With null evidence (+ reason) | {weak_with_null} ({_pct(weak_with_null, total_weaknesses)}) |",
+        "",
+        "### Strengths",
+        "",
+        f"| Metric | Value |",
+        f"|--------|------:|",
+        f"| Total strengths | {total_strengths} |",
+        f"| With evidence (substring) | {str_with_evidence} ({_pct(str_with_evidence, total_strengths)}) |",
+        f"| With null evidence (+ reason) | {str_with_null} ({_pct(str_with_null, total_strengths)}) |",
+        "",
+        "### Substring Verification",
+        "",
+        f"| Metric | Value |",
+        f"|--------|------:|",
+        f"| Evidence items checked | {evidence_checked} |",
+        f"| Mismatches (not in essay) | {evidence_mismatches} ({_pct(evidence_mismatches, evidence_checked)}) |",
         "",
         "## Top 10 Most Common Weakness Labels",
         "",

@@ -95,6 +95,7 @@ def evaluate_batch(
                     prompt_id=entry.get("prompt_id"),
                 )
                 result = resp.model_dump()
+                result["essay_text"] = entry["essay"]
                 result["_meta"] = {
                     "source_file": source,
                     "level": entry.get("level"),

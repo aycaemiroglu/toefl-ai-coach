@@ -124,6 +124,7 @@ class StrengthItem(BaseModel):
     label: str
     explanation: str
     evidence: str | None = None
+    evidence_fallback: str | None = None
 
 
 class WeaknessItem(BaseModel):
@@ -540,12 +541,16 @@ def _validate_and_shape_detailed(raw: dict[str, Any], essay: str) -> dict[str, A
             label = item.get("label")
             explanation = item.get("explanation")
             evidence = item.get("evidence")
+            fallback = item.get("evidence_reason") or item.get("evidence_fallback")
             if not isinstance(label, str) or not isinstance(explanation, str):
                 return None
             evidence_clean = _ensure_evidence_substring(
                 evidence if isinstance(evidence, str) else None, essay_text
             )
-            return {"label": label, "explanation": explanation, "evidence": evidence_clean}
+            reason = fallback if isinstance(fallback, str) and fallback.strip() else None
+            if evidence_clean is None and reason is None:
+                reason = "Strength observed across the essay, not tied to a single sentence."
+            return {"label": label, "explanation": explanation, "evidence": evidence_clean, "evidence_fallback": reason}
 
         def parse_weakness_item(item: Any, essay_text: str) -> dict[str, str | None] | None:
             if not isinstance(item, dict):

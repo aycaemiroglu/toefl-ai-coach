@@ -30,6 +30,25 @@ class TestStrengthEvidence:
                     f"Strength evidence not found in essay: {s['evidence']!r}"
                 )
 
+    def test_null_evidence_has_fallback(self, evaluate_result):
+        """If evidence is null, evidence_fallback must be a non-empty string."""
+        _, data, _ = evaluate_result
+        for s in data["evidence"]["strengths"]:
+            if s["evidence"] is None:
+                fallback = s.get("evidence_fallback")
+                assert fallback and isinstance(fallback, str) and fallback.strip(), (
+                    f"Strength '{s['label']}' has null evidence but no evidence_fallback"
+                )
+
+    def test_no_evidence_and_fallback_simultaneously(self, evaluate_result):
+        """Evidence and evidence_fallback should be mutually exclusive."""
+        _, data, _ = evaluate_result
+        for s in data["evidence"]["strengths"]:
+            if s["evidence"] is not None:
+                assert s.get("evidence_fallback") is None, (
+                    f"Strength '{s['label']}' has both evidence and evidence_fallback"
+                )
+
 
 class TestWeaknessEvidence:
     def test_evidence_is_substring_of_essay(self, evaluate_result):

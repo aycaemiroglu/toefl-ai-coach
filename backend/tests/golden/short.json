@@ -42,12 +42,14 @@
       {
         "label": "Clear position",
         "explanation": "The writer states a clear opinion in favor of technology.",
-        "evidence": "I partially agree, but overall I believe the benefits outweigh the drawbacks."
+        "evidence": "I partially agree, but overall I believe the benefits outweigh the drawbacks.",
+        "evidence_fallback": null
       },
       {
         "label": "Relevant examples",
         "explanation": "Concrete examples of technology benefits are provided.",
-        "evidence": "we can search for information online instead of going to the library"
+        "evidence": "we can search for information online instead of going to the library",
+        "evidence_fallback": null
       }
     ],
     "weaknesses": [

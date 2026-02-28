@@ -41,17 +41,20 @@
       {
         "label": "Comprehensive coverage",
         "explanation": "The essay thoroughly addresses multiple domains affected by technology.",
-        "evidence": null
+        "evidence": null,
+        "evidence_fallback": "Strength observed across the essay, not tied to a single sentence."
       },
       {
         "label": "Strong topic sentences",
         "explanation": "Each paragraph begins with a clear topic sentence that guides the reader.",
-        "evidence": "Furthermore, technology has revolutionized the field of education."
+        "evidence": "Furthermore, technology has revolutionized the field of education.",
+        "evidence_fallback": null
       },
       {
         "label": "Sophisticated vocabulary",
         "explanation": "The writer uses varied and precise word choices throughout.",
-        "evidence": "facilitated international business collaboration"
+        "evidence": "facilitated international business collaboration",
+        "evidence_fallback": null
       }
     ],
     "weaknesses": [

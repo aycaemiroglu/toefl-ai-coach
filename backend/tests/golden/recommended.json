@@ -42,17 +42,20 @@
       {
         "label": "Well-organized structure",
         "explanation": "The essay follows a clear pattern with introduction, body paragraphs, and conclusion.",
-        "evidence": null
+        "evidence": null,
+        "evidence_fallback": "Strength observed across the essay, not tied to a single sentence."
       },
       {
         "label": "Specific examples",
         "explanation": "The writer provides concrete real-world examples to support arguments.",
-        "evidence": "millions of students continued their education through online platforms like Zoom and Google Classroom"
+        "evidence": "millions of students continued their education through online platforms like Zoom and Google Classroom",
+        "evidence_fallback": null
       },
       {
         "label": "Balanced perspective",
         "explanation": "The writer acknowledges counterarguments before reaffirming the thesis.",
-        "evidence": "I acknowledge that technology also brings challenges."
+        "evidence": "I acknowledge that technology also brings challenges.",
+        "evidence_fallback": null
       }
     ],
     "weaknesses": [
