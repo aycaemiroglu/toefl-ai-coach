@@ -51,7 +51,7 @@ ALLOWED_NESTED = frozenset({
 
 CANONICAL_TOP_KEYS = {
     "request_id", "prompt_id", "model_name", "overall_score",
-    "timestamps", "text_stats", "rubric", "scoring",
+    "timestamps", "text_stats", "rubric", "scoring", "llm_config",
     "confidence", "length", "evidence",
     "top_fixes", "rewrite_first_paragraph",
 }
@@ -153,6 +153,10 @@ class TestCanonicalFieldsPresent:
     def test_text_stats_subkeys(self, response):
         for k in ("word_count", "sentence_count"):
             assert k in response["text_stats"], f"Missing text_stats.{k}"
+
+    def test_llm_config_subkeys(self, response):
+        for k in ("temperature", "max_tokens", "prompt_version"):
+            assert k in response["llm_config"], f"Missing llm_config.{k}"
 
     def test_evidence_subkeys(self, response):
         assert "strengths" in response["evidence"]

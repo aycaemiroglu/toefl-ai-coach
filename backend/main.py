@@ -20,6 +20,7 @@ Unified response contract (POST /api/evaluate):
   "rewrite_first_paragraph": "..."
 }
 """
+import hashlib
 import json
 import logging
 import os
@@ -30,6 +31,8 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 from pathlib import Path
+
+import cache as _cache
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +49,8 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 # --- Config ------------------------------------------------------------------
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+LLM_TEMPERATURE = 0.2
+LLM_MAX_TOKENS = 1024
 MIN_WORDS = 120
 RECOMMENDED_WORDS = 220
 FULL_CONFIDENCE_WORDS = 250
@@ -91,6 +96,12 @@ class Scoring(BaseModel):
     raw: float = Field(..., ge=0, le=30)
     length_penalty: float = Field(..., ge=0, le=1)
     final: float = Field(..., ge=0, le=30)
+
+
+class LlmConfig(BaseModel):
+    temperature: float
+    max_tokens: int
+    prompt_version: str
 
 
 ConfidenceLevel = Literal["Low", "Medium", "High"]
@@ -149,6 +160,7 @@ class EvaluateResponse(BaseModel):
     text_stats: TextStats
     rubric: Rubric
     scoring: Scoring
+    llm_config: LlmConfig
     confidence: Confidence
     length: LengthEvaluation
     evidence: Evidence
@@ -422,6 +434,14 @@ Do not output confidence; it will be computed server-side.
 Output only the raw JSON object, nothing else."""
 
 
+def _prompt_version(system_prompt: str) -> str:
+    """Stable hash of the LLM system prompt template (first 12 hex chars of SHA-256)."""
+    return hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()[:12]
+
+
+PROMPT_VERSION = _prompt_version(_build_system_prompt(detailed=True))
+
+
 def _build_user_prompt(prompt: str, essay: str) -> str:
     return f"""Essay topic (prompt):\n{prompt}\n\nEssay to evaluate:\n{essay}"""
 
@@ -616,10 +636,30 @@ def _validate_and_shape_detailed(raw: dict[str, Any], essay: str) -> dict[str, A
         return None
 
 
-def _call_groq(prompt: str, essay: str, fix_json: bool = False, detailed: bool = False) -> str:
+def _call_groq(
+    prompt: str,
+    essay: str,
+    fix_json: bool = False,
+    detailed: bool = False,
+    *,
+    use_cache: bool = False,
+    dry_run: bool = False,
+) -> str:
     system = _build_system_prompt(detailed=detailed)
     if fix_json:
         system += "\n\nThe previous response was invalid JSON. Output only the corrected JSON object, nothing else."
+    pv = _prompt_version(system)
+
+    if use_cache or dry_run:
+        cached = _cache.get(essay, GROQ_MODEL, pv)
+        if cached is not None:
+            logger.info("Cache HIT (prompt_version=%s)", pv)
+            return cached
+        if dry_run:
+            raise ValueError(
+                f"Dry-run mode: no cached response for this essay (prompt_version={pv})."
+            )
+
     user = _build_user_prompt(prompt, essay)
     resp = client.chat.completions.create(
         model=GROQ_MODEL,
@@ -627,23 +667,34 @@ def _call_groq(prompt: str, essay: str, fix_json: bool = False, detailed: bool =
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        temperature=0.2,
-        max_tokens=1024,
+        temperature=LLM_TEMPERATURE,
+        max_tokens=LLM_MAX_TOKENS,
     )
     choice = resp.choices[0] if resp.choices else None
     if not choice or not getattr(choice, "message", None):
         raise ValueError("Empty or invalid Groq response")
-    return choice.message.content or ""
+    content = choice.message.content or ""
+
+    if use_cache:
+        _cache.put(essay, GROQ_MODEL, pv, content)
+
+    return content
 
 
 def evaluate_essay_core(
     prompt: str,
     essay: str,
     prompt_id: str | None = None,
+    *,
+    use_cache: bool = False,
+    dry_run: bool = False,
 ) -> EvaluateResponse:
     """
     Core evaluation pipeline shared by the API endpoint and the offline harness.
     Raises ValueError for validation/LLM errors (caller maps to HTTP or CLI error).
+
+    use_cache: read/write LLM responses from file cache.
+    dry_run:   cache-only mode — never call the LLM (implies use_cache).
     """
     received_at = datetime.now(timezone.utc).isoformat()
     request_id = str(uuid.uuid4())
@@ -662,7 +713,10 @@ def evaluate_essay_core(
     shaped: dict[str, Any] | None = None
 
     for attempt, is_retry in enumerate([False, True], start=1):
-        content = _call_groq(prompt, essay_text, fix_json=is_retry, detailed=True)
+        content = _call_groq(
+            prompt, essay_text, fix_json=is_retry, detailed=True,
+            use_cache=use_cache, dry_run=dry_run,
+        )
         parsed = _parse_llm_json(content)
         if parsed is not None:
             shaped = _validate_and_shape_detailed(parsed, essay_text)
@@ -714,6 +768,11 @@ def evaluate_essay_core(
             raw=raw_score,
             length_penalty=calibration.length_factor,
             final=calibrated_score,
+        ),
+        llm_config=LlmConfig(
+            temperature=LLM_TEMPERATURE,
+            max_tokens=LLM_MAX_TOKENS,
+            prompt_version=PROMPT_VERSION,
         ),
         confidence=confidence,
         length=length_eval,

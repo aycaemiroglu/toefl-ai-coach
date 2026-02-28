@@ -76,6 +76,9 @@ def evaluate_batch(
     essays: list[dict[str, Any]],
     output_path: Path,
     delay: float = 0.0,
+    *,
+    use_cache: bool = False,
+    dry_run: bool = False,
 ) -> list[dict[str, Any]]:
     """
     Evaluate each essay through evaluate_essay_core and write results to JSONL.
@@ -93,6 +96,8 @@ def evaluate_batch(
                     prompt=entry["prompt"],
                     essay=entry["essay"],
                     prompt_id=entry.get("prompt_id"),
+                    use_cache=use_cache,
+                    dry_run=dry_run,
                 )
                 result = resp.model_dump()
                 result["essay_text"] = entry["essay"]

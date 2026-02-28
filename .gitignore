@@ -38,6 +38,9 @@ results/*.md
 frontend/node_modules/
 frontend/dist/
 
+# LLM response cache
+.cache/
+
 # IDE (extensions.json is committed for recommended extensions)
 .vscode/*
 !.vscode/extensions.json

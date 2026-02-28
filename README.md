@@ -104,6 +104,8 @@ python -m eval_harness --input data/essays --out results
 | `--out`, `-o` | Output directory for `results.jsonl` and `summary.md` (default: `results`) |
 | `--seed`, `-s` | Random seed for deterministic runs |
 | `--delay`, `-d` | Seconds between LLM calls to avoid rate-limits (default: 0) |
+| `--cache` | Enable LLM response caching (read on hit, write on miss) |
+| `--dry-run` | Skip LLM calls; replay cached responses only (implies `--cache`) |
 | `--verbose`, `-v` | Enable debug-level logging |
 
 ### Input formats
@@ -121,8 +123,75 @@ python -m eval_harness --input data/essays --out results
 ### Example
 
 ```bash
-# Deterministic run with 1s delay between API calls
-python -m eval_harness -i data/essays -o results --seed 42 --delay 1 -v
+# First run: evaluate and cache LLM responses
+python -m eval_harness -i data/essays -o results --cache --delay 1 -v
+
+# Subsequent runs: replay from cache (no LLM calls, instant)
+python -m eval_harness -i data/essays -o results --dry-run
+```
+
+---
+
+## Reproducibility
+
+The evaluation pipeline is designed for full reproducibility of results.
+
+### Prompt versioning
+
+Every response includes an `llm_config` block with the exact parameters used:
+
+```json
+{
+  "llm_config": {
+    "temperature": 0.2,
+    "max_tokens": 1024,
+    "prompt_version": "1929d3706e63"
+  }
+}
+```
+
+`prompt_version` is the first 12 hex chars of the SHA-256 hash of the system prompt template. If the prompt changes, the version changes — making it easy to track which prompt produced which results.
+
+### Deterministic downstream logic
+
+All server-side scoring functions are **pure** (no I/O, no randomness, no global state):
+
+| Function | Input | Output |
+|----------|-------|--------|
+| `_compute_calibration(wc, raw_score)` | word count + raw score | length_factor + calibrated_score |
+| `_compute_confidence(wc, rubric, score, weaknesses, delta)` | scoring signals | confidence level + score + reasons |
+| `_compute_length_evaluation(wc)` | word count | tier + message |
+| `_ensure_evidence_substring(evidence, essay)` | evidence string + essay | validated substring or null |
+
+Given the same LLM output, these functions always produce identical results.
+
+### LLM response caching
+
+Cache is stored in `.cache/llm_responses/` (gitignored). The cache key is:
+
+```
+SHA-256(essay_text + model_name + prompt_version)
+```
+
+This means a cached response is only reused when all three match — if the prompt template changes, old cache entries are automatically bypassed.
+
+| Mode | Behavior |
+|------|----------|
+| `--cache` | Read from cache on hit; call LLM and store on miss |
+| `--dry-run` | Read from cache only; error on miss (no LLM calls) |
+| (default) | No caching; always call LLM |
+
+### Typical workflow
+
+```bash
+# 1. Run with caching to populate the cache
+python -m eval_harness -i data/essays -o results --cache --delay 1
+
+# 2. Iterate on downstream logic (scoring, confidence, report) without LLM costs
+python -m eval_harness -i data/essays -o results --dry-run
+
+# 3. After changing the system prompt, the cache auto-invalidates
+#    (prompt_version changes -> cache miss -> fresh LLM calls)
 ```
 
 ---

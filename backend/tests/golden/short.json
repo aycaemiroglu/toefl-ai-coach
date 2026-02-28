@@ -17,6 +17,11 @@
     "length_penalty": 0.6773,
     "final": 14.9
   },
+  "llm_config": {
+    "temperature": 0.2,
+    "max_tokens": 1024,
+    "prompt_version": "1929d3706e63"
+  },
   "confidence": {
     "level": "Medium",
     "score": 55,

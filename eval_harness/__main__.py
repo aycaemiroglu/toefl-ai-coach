@@ -4,6 +4,8 @@ CLI entry point for the offline evaluation harness.
 Usage:
     python -m eval_harness --input data/essays --out results
     python -m eval_harness --input data/essays --out results --seed 42
+    python -m eval_harness --input data/essays --out results --cache
+    python -m eval_harness --input data/essays --out results --dry-run
 """
 import argparse
 import logging
@@ -50,11 +52,24 @@ def main():
         help="Seconds to wait between LLM calls (avoids rate-limits). Default: 0.",
     )
     parser.add_argument(
+        "--cache",
+        action="store_true",
+        help="Enable LLM response caching (read on hit, write on miss).",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Skip LLM calls; replay cached responses only (implies --cache).",
+    )
+    parser.add_argument(
         "--verbose", "-v",
         action="store_true",
         help="Enable verbose logging.",
     )
     args = parser.parse_args()
+
+    if args.dry_run:
+        args.cache = True
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -78,7 +93,12 @@ def main():
     logging.info("Found %d essay(s) in %s", len(essays), input_dir)
 
     jsonl_path = out_dir / "results.jsonl"
-    results = evaluate_batch(essays, jsonl_path, delay=args.delay)
+    results = evaluate_batch(
+        essays, jsonl_path,
+        delay=args.delay,
+        use_cache=args.cache,
+        dry_run=args.dry_run,
+    )
     logging.info("Results written to %s", jsonl_path)
 
     summary_path = out_dir / "summary.md"
